@@ -113,3 +113,20 @@ python src/gui_horizon.py
 ```
 
 `range.step_m = 0` usa automaticamente il pixel size del DTM.
+
+
+## Unified Camera View Tool
+
+Nuova GUI principale in `src/gui_unified.py` per generare `camera_view.png` (skyline + turbine in prospettiva) e opzionalmente `horizon_profile.png`.
+
+Avvio:
+
+```bash
+python src/gui_unified.py
+```
+
+Build Windows aggiornato:
+
+```bat
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py
+```

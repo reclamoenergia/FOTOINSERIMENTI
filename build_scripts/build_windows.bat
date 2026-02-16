@@ -2,7 +2,7 @@
 setlocal
 
 REM Build standalone Windows executable (GUI only, no console)
-pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py
 
-echo Build completed. Executable is in dist\WTGOverlay.exe
+echo Build completed. Executable is in dist\WTGUnifiedView.exe
 endlocal
