@@ -72,3 +72,44 @@ pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py
   - turbine disegnate
   - turbine scartate + motivo
 
+
+
+## Tool Orizzonte (DEM/DTM -> PNG)
+
+È disponibile un tool dedicato per generare il profilo orizzonte da GeoTIFF e sovrapporre le turbine.
+
+### Moduli
+
+- `src/core/dtm_sampler.py`: campionamento quote su GeoTIFF (bilineare con fallback nearest).
+- `src/core/horizon.py`: calcolo skyline, angoli turbine, marker direzione vista.
+- `src/core/horizon_plot.py`: rendering Matplotlib del PNG (`horizon.png`).
+- `src/gui_horizon.py`: GUI Tkinter per lanciare il tool a partire da JSON.
+
+### Avvio GUI orizzonte
+
+```bash
+python src/gui_horizon.py
+```
+
+### Schema JSON supportato
+
+```json
+{
+  "dtm": {"geotiff_path": "path/to/dtm.tif"},
+  "observer": {"position_xyz": [281915, 4832489, 655], "eye_height_m": 1.6},
+  "azimuth": {"start_deg": 350.0, "end_deg": 20.0, "step_deg": 0.2},
+  "range": {"max_m": 30000, "step_m": 0},
+  "view_direction": {"mode": "centroid"},
+  "turbines": [
+    {
+      "id": "WTG01",
+      "base_xyz": [283116.0, 4832098.0, 867.0],
+      "tower_height_m": 119.0,
+      "rotor_diameter_m": 162.0
+    }
+  ],
+  "output": {"png_path": "horizon.png", "transparent": false}
+}
+```
+
+`range.step_m = 0` usa automaticamente il pixel size del DTM.
