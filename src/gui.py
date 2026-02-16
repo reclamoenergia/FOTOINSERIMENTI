@@ -51,11 +51,30 @@ class OverlayApp(tk.Tk):
         root = ttk.Frame(self, padding=12)
         root.pack(fill=tk.BOTH, expand=True)
 
-        io_frame = ttk.LabelFrame(root, text="Input")
+        canvas = tk.Canvas(root, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
+        scrollable = ttk.Frame(canvas)
+
+        scrollable.bind(
+            "<Configure>",
+            lambda _: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+
+        canvas_window = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(canvas_window, width=event.width))
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.bind_all(sequence, lambda event: self._on_mousewheel(canvas, event))
+
+        io_frame = ttk.LabelFrame(scrollable, text="Input")
         io_frame.pack(fill=tk.X, pady=6)
         self._file_picker_row(io_frame, "Panoramica master", self.image_path, self._pick_image)
 
-        camera_frame = ttk.LabelFrame(root, text="Camera")
+        camera_frame = ttk.LabelFrame(scrollable, text="Camera")
         camera_frame.pack(fill=tk.X, pady=6)
         self._entry_row(camera_frame, "Camera X", self.camera_x, 0)
         self._entry_row(camera_frame, "Camera Y", self.camera_y, 1)
@@ -64,18 +83,18 @@ class OverlayApp(tk.Tk):
         self._entry_row(camera_frame, "Sensor W mm", self.sensor_w, 4)
         self._entry_row(camera_frame, "Sensor H mm", self.sensor_h, 5)
 
-        crop_frame = ttk.LabelFrame(root, text="Crop (opzionale)")
+        crop_frame = ttk.LabelFrame(scrollable, text="Crop (opzionale)")
         crop_frame.pack(fill=tk.X, pady=6)
         self._entry_row(crop_frame, "X", self.crop_x, 0)
         self._entry_row(crop_frame, "Y", self.crop_y, 1)
         self._entry_row(crop_frame, "Width", self.crop_w, 2)
         self._entry_row(crop_frame, "Height", self.crop_h, 3)
 
-        wtg_frame = ttk.LabelFrame(root, text="WTG (max 15)")
+        wtg_frame = ttk.LabelFrame(scrollable, text="WTG (max 15)")
         wtg_frame.pack(fill=tk.BOTH, expand=False, pady=6)
         self._build_wtg_table(wtg_frame)
 
-        options = ttk.LabelFrame(root, text="Parametri")
+        options = ttk.LabelFrame(scrollable, text="Parametri")
         options.pack(fill=tk.X, pady=6)
         self._entry_row(options, "FOV scale", self.fov_scale, 0)
         self._entry_row(options, "Line thickness", self.line_thickness, 1)
@@ -87,23 +106,31 @@ class OverlayApp(tk.Tk):
             row=5, column=0, columnspan=2, sticky="w", padx=8, pady=4
         )
 
-        colors = ttk.LabelFrame(root, text="Colori")
+        colors = ttk.LabelFrame(scrollable, text="Colori")
         colors.pack(fill=tk.X, pady=6)
         self._entry_row(colors, "Linea", self.line_color, 0)
         self._entry_row(colors, "Cerchio", self.circle_color, 1)
         self._entry_row(colors, "Testo", self.text_color, 2)
 
-        buttons = ttk.Frame(root)
+        buttons = ttk.Frame(scrollable)
         buttons.pack(fill=tk.X, pady=8)
         ttk.Button(buttons, text="Azzera dati WTG", command=self.clear_wtg_data).pack(
             side=tk.LEFT, padx=(0, 8)
         )
         ttk.Button(buttons, text="Genera Overlay", command=self.generate_overlay).pack(side=tk.LEFT)
 
-        log_frame = ttk.LabelFrame(root, text="Log")
+        log_frame = ttk.LabelFrame(scrollable, text="Log")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=6)
         self.log_text = tk.Text(log_frame, height=16)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    def _on_mousewheel(self, canvas: tk.Canvas, event) -> None:
+        if event.num == 4:
+            canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            canvas.yview_scroll(1, "units")
+        else:
+            canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _build_wtg_table(self, parent: ttk.LabelFrame) -> None:
         header_labels = ["ID", "X", "Y", "Z", "Tower H (m)", "Rotor D (m)"]
