@@ -53,7 +53,9 @@ def render_horizon_png(
     ax.set_ylabel("Elevazione (deg)")
     ax.grid(True, linestyle=":", alpha=0.5)
 
-    y_min = min(float(np.nanmin(elev_horizon)), *(m.e_base_deg for m in turbine_markers), default=-5.0)
+    y_min_candidates = [float(np.nanmin(elev_horizon))] if len(elev_horizon) else []
+    y_min_candidates.extend(m.e_base_deg for m in turbine_markers)
+    y_min = min(y_min_candidates, default=-5.0)
     y_max_candidates = [float(np.nanmax(elev_horizon))] if len(elev_horizon) else [10.0]
     y_max_candidates.extend(m.e_hub_deg for m in turbine_markers)
     y_max_candidates.extend(m.e_tip_deg for m in turbine_markers if m.e_tip_deg is not None)
