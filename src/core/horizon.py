@@ -224,10 +224,7 @@ def compute_view_marker(
     return az_plot_value, label
 
 
-def build_from_json_config(config_path: str | Path) -> Dict[str, Any]:
-    with open(config_path, "r", encoding="utf-8") as fp:
-        cfg = json.load(fp)
-
+def build_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     dtm_path = cfg["dtm"]["geotiff_path"]
     observer_xyz = tuple(float(v) for v in cfg["observer"]["position_xyz"])
     eye_h = float(cfg["observer"].get("eye_height_m", 1.6))
@@ -276,3 +273,9 @@ def build_from_json_config(config_path: str | Path) -> Dict[str, Any]:
         "turbine_markers": markers,
         "view_marker": view_marker,
     }
+
+
+def build_from_json_config(config_path: str | Path) -> Dict[str, Any]:
+    with open(config_path, "r", encoding="utf-8") as fp:
+        cfg = json.load(fp)
+    return build_from_config(cfg)
