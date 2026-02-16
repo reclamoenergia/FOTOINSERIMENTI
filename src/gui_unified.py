@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import time
 import tkinter as tk
@@ -56,6 +57,9 @@ class UnifiedViewApp(tk.Tk):
         self.debug_points = tk.BooleanVar(value=False)
 
         self.turbine_rows: list[dict[str, tk.StringVar]] = []
+        self.azimuth_min = tk.StringVar(value="-")
+        self.azimuth_max = tk.StringVar(value="-")
+        self._turbine_var_traces: list[tuple[tk.Variable, str]] = []
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=10)
@@ -73,6 +77,8 @@ class UnifiedViewApp(tk.Tk):
         self._build_view_section(left)
         self._build_horizon_section(left)
         self._build_turbines_section(left)
+        self._bind_live_updates()
+        self._refresh_turbine_azimuths()
 
         btns = ttk.Frame(left)
         btns.pack(fill=tk.X, pady=8)
@@ -149,7 +155,7 @@ class UnifiedViewApp(tk.Tk):
     def _build_turbines_section(self, parent):
         f = ttk.LabelFrame(parent, text="Turbine")
         f.pack(fill=tk.X, pady=4)
-        headers = ["ID", "X", "Y", "Tower H", "Rotor D"]
+        headers = ["ID", "X", "Y", "Tower H", "Rotor D", "Azimuth (deg)"]
         for c, h in enumerate(headers):
             ttk.Label(f, text=h).grid(row=0, column=c, padx=5, pady=3, sticky="w")
 
@@ -160,6 +166,7 @@ class UnifiedViewApp(tk.Tk):
                 "y": tk.StringVar(),
                 "th": tk.StringVar(),
                 "rd": tk.StringVar(),
+                "azimuth": tk.StringVar(value="-"),
             }
             self.turbine_rows.append(row)
             ttk.Entry(f, textvariable=row["id"], width=10).grid(row=r, column=0, padx=3, pady=2)
@@ -167,12 +174,146 @@ class UnifiedViewApp(tk.Tk):
             ttk.Entry(f, textvariable=row["y"], width=12).grid(row=r, column=2, padx=3, pady=2)
             ttk.Entry(f, textvariable=row["th"], width=10).grid(row=r, column=3, padx=3, pady=2)
             ttk.Entry(f, textvariable=row["rd"], width=10).grid(row=r, column=4, padx=3, pady=2)
+            ttk.Entry(f, textvariable=row["azimuth"], width=12, state="readonly").grid(row=r, column=5, padx=3, pady=2)
+
+        stats_row = self.MAX_TURBINES + 1
+        ttk.Label(f, text="Azimuth min").grid(row=stats_row, column=4, sticky="e", padx=5, pady=(8, 2))
+        ttk.Entry(f, textvariable=self.azimuth_min, width=12, state="readonly").grid(
+            row=stats_row, column=5, sticky="w", padx=5, pady=(8, 2)
+        )
+        ttk.Label(f, text="Azimuth max").grid(row=stats_row + 1, column=4, sticky="e", padx=5, pady=(2, 6))
+        ttk.Entry(f, textvariable=self.azimuth_max, width=12, state="readonly").grid(
+            row=stats_row + 1, column=5, sticky="w", padx=5, pady=(2, 6)
+        )
+
+        plot_frame = ttk.LabelFrame(f, text="Grafico osservatore / WTG")
+        plot_frame.grid(row=stats_row, column=0, columnspan=4, rowspan=2, sticky="nsew", padx=5, pady=6)
+        self.position_canvas = tk.Canvas(
+            plot_frame,
+            width=520,
+            height=220,
+            bg="white",
+            highlightthickness=1,
+            highlightbackground="#cfcfcf",
+        )
+        self.position_canvas.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
         btns = ttk.Frame(f)
-        btns.grid(row=self.MAX_TURBINES + 1, column=0, columnspan=6, sticky="w", pady=6)
+        btns.grid(row=self.MAX_TURBINES + 3, column=0, columnspan=6, sticky="w", pady=6)
+        ttk.Button(btns, text="Azzera dati WTG", command=self._clear_turbines).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btns, text="Carica turbine da JSON", command=self._load_turbines_json).pack(side=tk.LEFT)
         ttk.Button(btns, text="Carica config JSON", command=self._load_config_json).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Salva config JSON", command=self._save_config_json).pack(side=tk.LEFT, padx=6)
+
+    @staticmethod
+    def _safe_float(value: str) -> float | None:
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _azimuth_deg(x0: float, y0: float, xt: float, yt: float) -> float:
+        return (math.degrees(math.atan2(xt - x0, yt - y0)) + 360.0) % 360.0
+
+    def _bind_live_updates(self) -> None:
+        tracked_vars: list[tk.Variable] = [self.obs_x, self.obs_y]
+        for row in self.turbine_rows:
+            tracked_vars.extend([row["id"], row["x"], row["y"]])
+
+        for var in tracked_vars:
+            trace_id = var.trace_add("write", lambda *_: self._refresh_turbine_azimuths())
+            self._turbine_var_traces.append((var, trace_id))
+
+    def _refresh_turbine_azimuths(self) -> None:
+        ox = self._safe_float(self.obs_x.get())
+        oy = self._safe_float(self.obs_y.get())
+        azimuth_values: list[float] = []
+
+        for row in self.turbine_rows:
+            tx = self._safe_float(row["x"].get())
+            ty = self._safe_float(row["y"].get())
+            if ox is None or oy is None or tx is None or ty is None:
+                row["azimuth"].set("-")
+                continue
+            az = self._azimuth_deg(ox, oy, tx, ty)
+            row["azimuth"].set(f"{az:.2f}")
+            azimuth_values.append(az)
+
+        if azimuth_values:
+            self.azimuth_min.set(f"{min(azimuth_values):.2f}")
+            self.azimuth_max.set(f"{max(azimuth_values):.2f}")
+        else:
+            self.azimuth_min.set("-")
+            self.azimuth_max.set("-")
+
+        self._draw_position_plot(ox, oy)
+
+    def _draw_position_plot(self, ox: float | None, oy: float | None) -> None:
+        canvas = self.position_canvas
+        canvas.delete("all")
+
+        width = int(canvas.winfo_width() or canvas["width"])
+        height = int(canvas.winfo_height() or canvas["height"])
+        margin = 24
+
+        points: list[tuple[str, float, float, str]] = []
+        if ox is not None and oy is not None:
+            points.append(("observer", ox, oy, "OBS"))
+
+        for row in self.turbine_rows:
+            tx = self._safe_float(row["x"].get())
+            ty = self._safe_float(row["y"].get())
+            if tx is None or ty is None:
+                continue
+            label = row["id"].get().strip() or "WTG"
+            points.append(("wtg", tx, ty, label))
+
+        canvas.create_rectangle(1, 1, width - 1, height - 1, outline="#e0e0e0")
+        if not points:
+            canvas.create_text(width // 2, height // 2, text="Inserire osservatore e WTG per visualizzare il grafico", fill="#666")
+            return
+
+        xs = [p[1] for p in points]
+        ys = [p[2] for p in points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        span_x = max(max_x - min_x, 1.0)
+        span_y = max(max_y - min_y, 1.0)
+        scale = min((width - 2 * margin) / span_x, (height - 2 * margin) / span_y)
+
+        def to_canvas(px: float, py: float) -> tuple[float, float]:
+            x = margin + (px - min_x) * scale
+            y = height - margin - (py - min_y) * scale
+            return x, y
+
+        canvas.create_line(margin, height - margin, width - margin, height - margin, fill="#bdbdbd")
+        canvas.create_line(margin, margin, margin, height - margin, fill="#bdbdbd")
+        canvas.create_text(width - margin, height - margin + 12, text="X", fill="#777")
+        canvas.create_text(margin - 10, margin, text="Y", fill="#777")
+
+        for ptype, px, py, label in points:
+            cx_plot, cy_plot = to_canvas(px, py)
+            if ptype == "observer":
+                canvas.create_rectangle(cx_plot - 6, cy_plot - 6, cx_plot + 6, cy_plot + 6, fill="#1f77b4", outline="#1f77b4")
+                canvas.create_text(cx_plot + 9, cy_plot - 10, text=label, anchor="w", fill="#1f77b4", font=("TkDefaultFont", 9, "bold"))
+            else:
+                canvas.create_oval(cx_plot - 4, cy_plot - 4, cx_plot + 4, cy_plot + 4, fill="#d62728", outline="#d62728")
+                canvas.create_text(cx_plot + 8, cy_plot - 8, text=label, anchor="w", fill="#444")
+
+    def _clear_turbines(self) -> None:
+        for i, row in enumerate(self.turbine_rows, start=1):
+            row["id"].set(f"WTG{i:02d}")
+            row["x"].set("")
+            row["y"].set("")
+            row["th"].set("")
+            row["rd"].set("")
+            row["azimuth"].set("-")
+        self._refresh_turbine_azimuths()
+        self._append("Dati WTG azzerati")
 
     def _pick_geotiff(self):
         p = filedialog.askopenfilename(filetypes=[("GeoTIFF", "*.tif *.tiff"), ("All", "*.*")])
