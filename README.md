@@ -83,7 +83,7 @@ pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py
 - `src/core/dtm_sampler.py`: campionamento quote su GeoTIFF (bilineare con fallback nearest).
 - `src/core/horizon.py`: calcolo skyline, angoli turbine, marker direzione vista.
 - `src/core/horizon_plot.py`: rendering Matplotlib del PNG (`horizon.png`).
-- `src/gui_horizon.py`: GUI Tkinter per lanciare il tool a partire da JSON.
+- `src/gui_horizon.py`: GUI Tkinter per lanciare il tool inserendo i parametri turbine direttamente a interfaccia (max 5).
 
 ### Avvio GUI orizzonte
 

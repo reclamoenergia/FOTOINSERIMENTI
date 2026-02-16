@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -10,6 +9,8 @@ from core.horizon_plot import render_horizon_png
 
 
 class HorizonApp(tk.Tk):
+    MAX_TURBINES = 5
+
     def __init__(self) -> None:
         super().__init__()
         self.title("WTG Horizon Tool")
@@ -28,7 +29,7 @@ class HorizonApp(tk.Tk):
         self.max_range_m = tk.StringVar(value="30000")
         self.step_m = tk.StringVar(value="0")
 
-        self.turbines_path = tk.StringVar()
+        self.turbine_rows: list[dict[str, tk.StringVar]] = []
         self.output_png = tk.StringVar(value="horizon.png")
         self.transparent = tk.BooleanVar(value=False)
 
@@ -81,13 +82,9 @@ class HorizonApp(tk.Tk):
         ttk.Label(azimuth, text="Step campionamento (m)").grid(row=1, column=2, sticky="w", padx=8, pady=5)
         ttk.Entry(azimuth, textvariable=self.step_m, width=12).grid(row=1, column=3, padx=8, pady=5)
 
-        turbines = ttk.LabelFrame(root, text="Turbine")
+        turbines = ttk.LabelFrame(root, text="Turbine (max 5)")
         turbines.pack(fill=tk.X, pady=6)
-
-        ttk.Label(turbines, text="File turbine JSON").grid(row=0, column=0, sticky="w", padx=8, pady=5)
-        ttk.Entry(turbines, textvariable=self.turbines_path, width=80).grid(row=0, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Button(turbines, text="Sfoglia", command=self._pick_turbines_json).grid(row=0, column=2, padx=8, pady=5)
-        turbines.columnconfigure(1, weight=1)
+        self._build_turbines_table(turbines)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=tk.X, pady=6)
@@ -103,11 +100,6 @@ class HorizonApp(tk.Tk):
         if path:
             self.geotiff_path.set(path)
 
-    def _pick_turbines_json(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All files", "*.*")])
-        if path:
-            self.turbines_path.set(path)
-
     def _pick_png(self) -> None:
         path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG", "*.png")])
         if path:
@@ -117,26 +109,69 @@ class HorizonApp(tk.Tk):
         self.log.insert(tk.END, text + "\n")
         self.log.see(tk.END)
 
-    def _load_turbines(self) -> list[dict]:
-        turbines_file = Path(self.turbines_path.get().strip())
-        if not turbines_file.exists():
-            raise FileNotFoundError("Seleziona un file turbine JSON valido")
+    def _build_turbines_table(self, parent: ttk.LabelFrame) -> None:
+        headers = ["ID", "X", "Y", "Z", "Tower H (m)", "Rotor D (m)"]
+        for col, header in enumerate(headers):
+            ttk.Label(parent, text=header).grid(row=0, column=col, sticky="w", padx=5, pady=4)
 
-        with open(turbines_file, "r", encoding="utf-8") as fp:
-            data = json.load(fp)
+        for i in range(1, self.MAX_TURBINES + 1):
+            row = {
+                "id": tk.StringVar(value=f"WTG{i:02d}"),
+                "x": tk.StringVar(),
+                "y": tk.StringVar(),
+                "z": tk.StringVar(),
+                "tower_height_m": tk.StringVar(),
+                "rotor_diameter_m": tk.StringVar(),
+            }
+            self.turbine_rows.append(row)
 
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and isinstance(data.get("turbines"), list):
-            return data["turbines"]
-        raise ValueError("Il file turbine deve contenere una lista o una chiave 'turbines'")
+            ttk.Entry(parent, textvariable=row["id"], width=14).grid(row=i, column=0, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["x"], width=14).grid(row=i, column=1, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["y"], width=14).grid(row=i, column=2, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["z"], width=14).grid(row=i, column=3, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["tower_height_m"], width=14).grid(row=i, column=4, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["rotor_diameter_m"], width=14).grid(row=i, column=5, padx=5, pady=3, sticky="ew")
+
+        for col in range(len(headers)):
+            parent.columnconfigure(col, weight=1)
+
+    def _collect_turbines(self) -> list[dict]:
+        turbines: list[dict] = []
+        for i, row in enumerate(self.turbine_rows, start=1):
+            x_raw = row["x"].get().strip()
+            if x_raw == "":
+                continue
+
+            y_raw = row["y"].get().strip()
+            z_raw = row["z"].get().strip()
+            tower_raw = row["tower_height_m"].get().strip()
+            rotor_raw = row["rotor_diameter_m"].get().strip()
+
+            if not all([y_raw, z_raw, tower_raw, rotor_raw]):
+                raise ValueError(
+                    f"Turbina riga {i}: compila Y, Z, Tower H e Rotor D quando X è valorizzato"
+                )
+
+            turbines.append(
+                {
+                    "id": row["id"].get().strip() or f"WTG{i:02d}",
+                    "base_xyz": [float(x_raw), float(y_raw), float(z_raw)],
+                    "tower_height_m": float(tower_raw),
+                    "rotor_diameter_m": float(rotor_raw),
+                }
+            )
+
+        if not turbines:
+            raise ValueError("Inserisci almeno una turbina (X, Y, Z, Tower H, Rotor D)")
+
+        return turbines
 
     def _build_config(self) -> dict:
         geotiff = Path(self.geotiff_path.get().strip())
         if not geotiff.exists():
             raise FileNotFoundError("Seleziona un percorso GeoTIFF valido")
 
-        turbines = self._load_turbines()
+        turbines = self._collect_turbines()
 
         return {
             "dtm": {"geotiff_path": str(geotiff)},
