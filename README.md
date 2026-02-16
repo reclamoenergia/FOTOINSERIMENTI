@@ -35,7 +35,6 @@ project/
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install pyinstaller
 ```
 
 ## Esecuzione (sviluppo)
@@ -59,27 +58,11 @@ Vedi `example.json` per lo schema completo.
 build_scripts\build_windows.bat
 ```
 
-Lo script usa:
+Script interno:
 
 ```bat
 pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py
 ```
-
-e, se `rasterio` è installato nell'ambiente di build, aggiunge automaticamente i flag PyInstaller:
-
-```bat
---hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
-```
-
-## Troubleshooting packaging
-
-Se all'avvio dell'exe compare errore simile a:
-
-```text
-ModuleNotFoundError: No module named 'rasterio.sample'
-```
-
-ricostruire l'exe nello stesso ambiente Python in cui `rasterio` è installato e usando lo script `build_scripts\build_windows.bat` aggiornato (include hidden-import/collect-submodules necessari).
 
 ## Output
 
@@ -88,4 +71,70 @@ ricostruire l'exe nello stesso ambiente Python in cui `rasterio` è installato e
   - turbine processate
   - turbine disegnate
   - turbine scartate + motivo
+
+
+
+## Tool Orizzonte (DEM/DTM -> PNG)
+
+È disponibile un tool dedicato per generare il profilo orizzonte da GeoTIFF e sovrapporre le turbine.
+
+### Moduli
+
+- `src/core/dtm_sampler.py`: campionamento quote su GeoTIFF (bilineare con fallback nearest).
+- `src/core/horizon.py`: calcolo skyline, angoli turbine, marker direzione vista.
+- `src/core/horizon_plot.py`: rendering Matplotlib del PNG (`horizon.png`).
+- `src/gui_horizon.py`: GUI Tkinter per lanciare il tool inserendo i parametri turbine direttamente a interfaccia (max 5).
+
+### Avvio GUI orizzonte
+
+```bash
+python src/gui_horizon.py
+```
+
+### Schema JSON supportato
+
+```json
+{
+  "dtm": {"geotiff_path": "path/to/dtm.tif"},
+  "observer": {"position_xyz": [281915, 4832489, 655], "eye_height_m": 1.6},
+  "azimuth": {"start_deg": 350.0, "end_deg": 20.0, "step_deg": 0.2},
+  "range": {"max_m": 30000, "step_m": 0},
+  "view_direction": {"mode": "centroid"},
+  "turbines": [
+    {
+      "id": "WTG01",
+      "base_xyz": [283116.0, 4832098.0, 867.0],
+      "tower_height_m": 119.0,
+      "rotor_diameter_m": 162.0
+    }
+  ],
+  "output": {"png_path": "horizon.png", "transparent": false}
+}
+```
+
+`range.step_m = 0` usa automaticamente il pixel size del DTM.
+
+
+## Unified Camera View Tool
+
+Nuova GUI principale in `src/gui_unified.py` per generare `camera_view.png` (skyline + turbine in prospettiva) e opzionalmente `horizon_profile.png`.
+
+Avvio:
+
+```bash
+python src/gui_unified.py
+```
+
+Note operative (versione corrente):
+
+- il salvataggio/caricamento configurazione JSON supporta tutti i parametri della GUI (pulsanti `Salva config JSON` / `Carica config JSON`);
+- la quota osservatore è sempre calcolata da DTM (`Z = DTM(X,Y) + eye_height`);
+- la quota base di ogni WTG è sempre calcolata da DTM a partire da `(X,Y)`;
+- descrizione algoritmo disponibile in `docs/wtg_unified_algorithm.md`.
+
+Build Windows aggiornato:
+
+```bat
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py
+```
 

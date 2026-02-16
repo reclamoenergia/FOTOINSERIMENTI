@@ -79,10 +79,7 @@ def _as_vector3(values: Any, field_name: str) -> Vector3:
     return (float(values[0]), float(values[1]), float(values[2]))
 
 
-def load_scene_config(json_path: str | Path) -> SceneConfig:
-    with open(json_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-
+def parse_scene_payload(payload: Dict[str, Any]) -> SceneConfig:
     camera = payload.get("camera", {})
     image = payload.get("image", {})
     turbines_data = payload.get("turbines", [])
@@ -120,6 +117,12 @@ def load_scene_config(json_path: str | Path) -> SceneConfig:
         fov_scale=float(image.get("fov_scale", 1.0)),
         turbines=turbines,
     )
+
+
+def load_scene_config(json_path: str | Path) -> SceneConfig:
+    with open(json_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return parse_scene_payload(payload)
 
 
 def _centroid(points: List[Vector3]) -> Vector3:
