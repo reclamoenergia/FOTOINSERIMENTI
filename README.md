@@ -125,8 +125,16 @@ Avvio:
 python src/gui_unified.py
 ```
 
+Note operative (versione corrente):
+
+- il salvataggio/caricamento configurazione JSON supporta tutti i parametri della GUI (pulsanti `Salva config JSON` / `Carica config JSON`);
+- la quota osservatore è sempre calcolata da DTM (`Z = DTM(X,Y) + eye_height`);
+- la quota base di ogni WTG è sempre calcolata da DTM a partire da `(X,Y)`;
+- descrizione algoritmo disponibile in `docs/wtg_unified_algorithm.md`.
+
 Build Windows aggiornato:
 
 ```bat
 python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py
 ```
+
