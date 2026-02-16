@@ -7,17 +7,29 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image
 
-from core.overlay_renderer import OverlayStyle, load_scene_config, render_overlay, summary_to_lines
+from core.overlay_renderer import (
+    OverlayStyle,
+    parse_scene_payload,
+    render_overlay,
+    summary_to_lines,
+)
 
 
 class OverlayApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("WTG Overlay Generator")
-        self.geometry("860x720")
+        self.geometry("980x860")
 
         self.json_path = tk.StringVar()
         self.image_path = tk.StringVar()
+
+        self.camera_x = tk.StringVar(value="0.0")
+        self.camera_y = tk.StringVar(value="-2000.0")
+        self.camera_z = tk.StringVar(value="150.0")
+        self.focal_mm = tk.StringVar(value="50.0")
+        self.sensor_w = tk.StringVar(value="36.0")
+        self.sensor_h = tk.StringVar(value="24.0")
 
         self.crop_x = tk.StringVar(value="0")
         self.crop_y = tk.StringVar(value="0")
@@ -47,6 +59,20 @@ class OverlayApp(tk.Tk):
         self._file_picker_row(io_frame, "JSON file", self.json_path, self._pick_json)
         self._file_picker_row(io_frame, "Panoramica master", self.image_path, self._pick_image)
 
+        json_editor_frame = ttk.LabelFrame(root, text="Editor JSON (tutti i campi modificabili)")
+        json_editor_frame.pack(fill=tk.BOTH, expand=False, pady=6)
+        self.json_text = tk.Text(json_editor_frame, height=12)
+        self.json_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        camera_frame = ttk.LabelFrame(root, text="Camera (JSON modificabile da UI)")
+        camera_frame.pack(fill=tk.X, pady=6)
+        self._entry_row(camera_frame, "Camera X", self.camera_x, 0)
+        self._entry_row(camera_frame, "Camera Y", self.camera_y, 1)
+        self._entry_row(camera_frame, "Camera Z", self.camera_z, 2)
+        self._entry_row(camera_frame, "Focale mm", self.focal_mm, 3)
+        self._entry_row(camera_frame, "Sensor W mm", self.sensor_w, 4)
+        self._entry_row(camera_frame, "Sensor H mm", self.sensor_h, 5)
+
         crop_frame = ttk.LabelFrame(root, text="Crop (opzionale)")
         crop_frame.pack(fill=tk.X, pady=6)
         self._entry_row(crop_frame, "X", self.crop_x, 0)
@@ -72,8 +98,12 @@ class OverlayApp(tk.Tk):
         self._entry_row(colors, "Cerchio", self.circle_color, 1)
         self._entry_row(colors, "Testo", self.text_color, 2)
 
-        generate_btn = ttk.Button(root, text="Genera Overlay", command=self.generate_overlay)
-        generate_btn.pack(fill=tk.X, pady=8)
+        buttons = ttk.Frame(root)
+        buttons.pack(fill=tk.X, pady=8)
+        ttk.Button(buttons, text="Carica JSON in UI", command=self.load_json_to_ui).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Button(buttons, text="Genera Overlay", command=self.generate_overlay).pack(side=tk.LEFT)
 
         log_frame = ttk.LabelFrame(root, text="Log")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=6)
@@ -95,6 +125,8 @@ class OverlayApp(tk.Tk):
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All files", "*.*")])
         if path:
             self.json_path.set(path)
+            self._load_json_file_to_editor(Path(path))
+            self.load_json_to_ui()
 
     def _pick_image(self) -> None:
         path = filedialog.askopenfilename(
@@ -103,31 +135,91 @@ class OverlayApp(tk.Tk):
         if path:
             self.image_path.set(path)
 
+
+    def _load_json_file_to_editor(self, json_file: Path) -> None:
+        with open(json_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        pretty = json.dumps(payload, indent=2, ensure_ascii=False)
+        self.json_text.delete("1.0", tk.END)
+        self.json_text.insert("1.0", pretty)
+
+    def _payload_from_editor_or_file(self) -> dict:
+        editor_raw = self.json_text.get("1.0", tk.END).strip()
+        if editor_raw:
+            return json.loads(editor_raw)
+
+        json_file = Path(self.json_path.get())
+        if not json_file.exists():
+            raise FileNotFoundError("Selezionare un JSON valido")
+
+        with open(json_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
     def _append_log(self, line: str) -> None:
         self.log_text.insert(tk.END, line + "\n")
         self.log_text.see(tk.END)
 
+    def _collect_scene_payload(self) -> dict:
+        payload = self._payload_from_editor_or_file()
+
+        camera = payload.setdefault("camera", {})
+        image = payload.setdefault("image", {})
+        image.setdefault("crop", {})
+
+        camera["position_xyz"] = [
+            float(self.camera_x.get()),
+            float(self.camera_y.get()),
+            float(self.camera_z.get()),
+        ]
+        camera["focal_mm"] = float(self.focal_mm.get())
+        camera["sensor_mm"] = [float(self.sensor_w.get()), float(self.sensor_h.get())]
+
+        image["crop"] = {
+            "x": int(self.crop_x.get()),
+            "y": int(self.crop_y.get()),
+            "w": int(self.crop_w.get()),
+            "h": int(self.crop_h.get()),
+        }
+        image["fov_scale"] = float(self.fov_scale.get())
+
+        return payload
+
+    def load_json_to_ui(self) -> None:
+        self.log_text.delete("1.0", tk.END)
+        try:
+            payload = self._payload_from_editor_or_file()
+
+            scene = parse_scene_payload(payload)
+            self.camera_x.set(str(scene.camera_position[0]))
+            self.camera_y.set(str(scene.camera_position[1]))
+            self.camera_z.set(str(scene.camera_position[2]))
+            self.focal_mm.set(str(scene.focal_mm))
+            self.sensor_w.set(str(scene.sensor_mm[0]))
+            self.sensor_h.set(str(scene.sensor_mm[1]))
+            self.crop_x.set(str(scene.crop.x))
+            self.crop_y.set(str(scene.crop.y))
+            self.crop_w.set(str(scene.crop.w))
+            self.crop_h.set(str(scene.crop.h))
+            self.fov_scale.set(str(scene.fov_scale))
+
+            self._append_log("Parametri JSON caricati nell'interfaccia.")
+        except Exception as exc:
+            self._append_log(f"Errore: {exc}")
+            messagebox.showerror("Errore", str(exc))
+
     def generate_overlay(self) -> None:
         self.log_text.delete("1.0", tk.END)
         try:
-            json_file = Path(self.json_path.get())
             image_file = Path(self.image_path.get())
 
-            if not json_file.exists():
-                raise FileNotFoundError("Selezionare un JSON valido")
             if not image_file.exists():
                 raise FileNotFoundError("Selezionare una panoramica valida")
 
-            scene = load_scene_config(json_file)
+            payload = self._collect_scene_payload()
+            scene = parse_scene_payload(payload)
 
             with Image.open(image_file) as im:
                 scene.image_width, scene.image_height = im.size
-
-            scene.crop.x = int(self.crop_x.get())
-            scene.crop.y = int(self.crop_y.get())
-            scene.crop.w = int(self.crop_w.get())
-            scene.crop.h = int(self.crop_h.get())
-            scene.fov_scale = float(self.fov_scale.get())
 
             style = OverlayStyle(
                 line_thickness=int(self.line_thickness.get()),
@@ -148,15 +240,22 @@ class OverlayApp(tk.Tk):
             with open(params_out, "w", encoding="utf-8") as f:
                 json.dump(
                     {
-                        "json_input": str(json_file),
+                        "json_input": str(Path(self.json_path.get())),
                         "image_input": str(image_file),
-                        "crop": {
-                            "x": scene.crop.x,
-                            "y": scene.crop.y,
-                            "w": scene.crop.w,
-                            "h": scene.crop.h,
+                        "camera": {
+                            "position_xyz": list(scene.camera_position),
+                            "focal_mm": scene.focal_mm,
+                            "sensor_mm": list(scene.sensor_mm),
                         },
-                        "fov_scale": scene.fov_scale,
+                        "image": {
+                            "crop": {
+                                "x": scene.crop.x,
+                                "y": scene.crop.y,
+                                "w": scene.crop.w,
+                                "h": scene.crop.h,
+                            },
+                            "fov_scale": scene.fov_scale,
+                        },
                     },
                     f,
                     indent=2,
