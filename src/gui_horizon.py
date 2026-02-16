@@ -4,7 +4,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from core.horizon import build_from_config
+from core.horizon import azimuth_deg, build_from_config, elevation_deg
 from core.horizon_plot import render_horizon_png
 
 
@@ -34,6 +34,8 @@ class HorizonApp(tk.Tk):
         self.transparent = tk.BooleanVar(value=False)
 
         self._build_ui()
+        self._bind_live_updates()
+        self._update_live_turbine_outputs()
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=12)
@@ -110,7 +112,19 @@ class HorizonApp(tk.Tk):
         self.log.see(tk.END)
 
     def _build_turbines_table(self, parent: ttk.LabelFrame) -> None:
-        headers = ["ID", "X", "Y", "Z", "Tower H (m)", "Rotor D (m)"]
+        headers = [
+            "ID",
+            "X",
+            "Y",
+            "Z",
+            "Tower H (m)",
+            "Rotor D (m)",
+            "Azimuth (°)",
+            "Ang. base (°)",
+            "Ang. hub (°)",
+            "Orizzonte (°)",
+            "Esito",
+        ]
         for col, header in enumerate(headers):
             ttk.Label(parent, text=header).grid(row=0, column=col, sticky="w", padx=5, pady=4)
 
@@ -122,6 +136,11 @@ class HorizonApp(tk.Tk):
                 "z": tk.StringVar(),
                 "tower_height_m": tk.StringVar(),
                 "rotor_diameter_m": tk.StringVar(),
+                "azimuth_deg": tk.StringVar(),
+                "e_base_deg": tk.StringVar(),
+                "e_hub_deg": tk.StringVar(),
+                "e_horizon_deg": tk.StringVar(),
+                "horizon_state": tk.StringVar(),
             }
             self.turbine_rows.append(row)
 
@@ -131,6 +150,21 @@ class HorizonApp(tk.Tk):
             ttk.Entry(parent, textvariable=row["z"], width=14).grid(row=i, column=3, padx=5, pady=3, sticky="ew")
             ttk.Entry(parent, textvariable=row["tower_height_m"], width=14).grid(row=i, column=4, padx=5, pady=3, sticky="ew")
             ttk.Entry(parent, textvariable=row["rotor_diameter_m"], width=14).grid(row=i, column=5, padx=5, pady=3, sticky="ew")
+            ttk.Entry(parent, textvariable=row["azimuth_deg"], width=12, state="readonly").grid(
+                row=i, column=6, padx=5, pady=3, sticky="ew"
+            )
+            ttk.Entry(parent, textvariable=row["e_base_deg"], width=12, state="readonly").grid(
+                row=i, column=7, padx=5, pady=3, sticky="ew"
+            )
+            ttk.Entry(parent, textvariable=row["e_hub_deg"], width=12, state="readonly").grid(
+                row=i, column=8, padx=5, pady=3, sticky="ew"
+            )
+            ttk.Entry(parent, textvariable=row["e_horizon_deg"], width=12, state="readonly").grid(
+                row=i, column=9, padx=5, pady=3, sticky="ew"
+            )
+            ttk.Entry(parent, textvariable=row["horizon_state"], width=12, state="readonly").grid(
+                row=i, column=10, padx=5, pady=3, sticky="ew"
+            )
 
         for col in range(len(headers)):
             parent.columnconfigure(col, weight=1)
@@ -200,8 +234,90 @@ class HorizonApp(tk.Tk):
             },
         }
 
+    def _bind_live_updates(self) -> None:
+        vars_to_watch: list[tk.StringVar] = [
+            self.observer_x,
+            self.observer_y,
+            self.observer_z,
+            self.eye_height_m,
+        ]
+        vars_clear_horizon_only: list[tk.StringVar] = [
+            self.az_start_deg,
+            self.az_end_deg,
+            self.az_step_deg,
+            self.max_range_m,
+            self.step_m,
+        ]
+
+        for row in self.turbine_rows:
+            vars_to_watch.extend(
+                [
+                    row["x"],
+                    row["y"],
+                    row["z"],
+                    row["tower_height_m"],
+                    row["rotor_diameter_m"],
+                ]
+            )
+
+        for var in vars_to_watch:
+            var.trace_add("write", self._on_geometry_inputs_changed)
+        for var in vars_clear_horizon_only:
+            var.trace_add("write", self._on_output_inputs_changed)
+
+    def _on_geometry_inputs_changed(self, *_args) -> None:
+        self._update_live_turbine_outputs()
+        self._clear_horizon_outputs()
+
+    def _on_output_inputs_changed(self, *_args) -> None:
+        self._clear_horizon_outputs()
+
+    def _update_live_turbine_outputs(self) -> None:
+        try:
+            x0 = float(self.observer_x.get())
+            y0 = float(self.observer_y.get())
+            z_obs = float(self.observer_z.get()) + float(self.eye_height_m.get())
+        except ValueError:
+            for row in self.turbine_rows:
+                row["azimuth_deg"].set("")
+                row["e_base_deg"].set("")
+                row["e_hub_deg"].set("")
+            return
+
+        for row in self.turbine_rows:
+            try:
+                tx = float(row["x"].get())
+                ty = float(row["y"].get())
+                tz = float(row["z"].get())
+                tower_h = float(row["tower_height_m"].get())
+            except ValueError:
+                row["azimuth_deg"].set("")
+                row["e_base_deg"].set("")
+                row["e_hub_deg"].set("")
+                continue
+
+            d = ((tx - x0) ** 2 + (ty - y0) ** 2) ** 0.5
+            if d <= 0:
+                row["azimuth_deg"].set("0.00")
+                row["e_base_deg"].set("0.00")
+                row["e_hub_deg"].set("0.00")
+                continue
+
+            row["azimuth_deg"].set(f"{azimuth_deg(x0, y0, tx, ty):.2f}")
+            row["e_base_deg"].set(f"{elevation_deg(z_obs, tz, d):.2f}")
+            row["e_hub_deg"].set(f"{elevation_deg(z_obs, tz + tower_h, d):.2f}")
+
+    def _clear_horizon_outputs(self) -> None:
+        for row in self.turbine_rows:
+            row["e_horizon_deg"].set("")
+            row["horizon_state"].set("")
+
+    def _active_turbine_rows(self) -> list[dict[str, tk.StringVar]]:
+        return [row for row in self.turbine_rows if row["x"].get().strip() != ""]
+
     def generate(self) -> None:
         self.log.delete("1.0", tk.END)
+        self._clear_horizon_outputs()
         try:
             cfg = self._build_config()
 
@@ -216,6 +332,10 @@ class HorizonApp(tk.Tk):
             )
 
             self._append(f"PNG creato: {self.output_png.get()}")
+            for row, marker in zip(self._active_turbine_rows(), data["turbine_markers"]):
+                row["e_horizon_deg"].set(f"{marker.e_horizon_deg:.2f}")
+                row["horizon_state"].set("SOPRA" if marker.visible_hub else "SOTTO")
+
             for marker in data["turbine_markers"]:
                 visibility = "SOPRA" if marker.visible_hub else "SOTTO"
                 self._append(

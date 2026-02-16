@@ -64,6 +64,10 @@ def render_horizon_png(
     margin = 1.0
     ax.set_ylim(y_min - margin, y_max + margin)
 
+    x_span = float(np.nanmax(az_plot) - np.nanmin(az_plot)) if len(az_plot) > 1 else 1.0
+    y_span = max((y_max - y_min) + 2.0 * margin, 1e-6)
+    ax.set_aspect(x_span / y_span)
+
     lines = _format_log_lines(turbine_markers)
     if lines:
         preview = "\n".join(lines[:10])
