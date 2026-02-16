@@ -42,8 +42,6 @@ class UnifiedViewApp(tk.Tk):
 
         self.obs_x = tk.StringVar()
         self.obs_y = tk.StringVar()
-        self.obs_z = tk.StringVar()
-        self.z_from_dtm = tk.BooleanVar(value=False)
         self.eye_h = tk.StringVar(value="1.6")
 
         self.view_mode = tk.StringVar(value="auto")
@@ -118,10 +116,10 @@ class UnifiedViewApp(tk.Tk):
     def _build_observer_section(self, parent):
         f = ttk.LabelFrame(parent, text="Osservatore")
         f.pack(fill=tk.X, pady=4)
-        for i, (label, var) in enumerate((("Observer X", self.obs_x), ("Observer Y", self.obs_y), ("Camera Z", self.obs_z), ("Eye height", self.eye_h))):
+        for i, (label, var) in enumerate((("Observer X", self.obs_x), ("Observer Y", self.obs_y), ("Eye height", self.eye_h))):
             ttk.Label(f, text=label).grid(row=0, column=i * 2, sticky="w", padx=6, pady=4)
             ttk.Entry(f, textvariable=var, width=12).grid(row=0, column=i * 2 + 1, padx=6, pady=4, sticky="w")
-        ttk.Checkbutton(f, text="Z da DTM + eye height", variable=self.z_from_dtm).grid(row=1, column=0, columnspan=3, sticky="w", padx=6)
+        ttk.Label(f, text="Quota osservatore = DTM(X,Y) + eye height").grid(row=1, column=0, columnspan=4, sticky="w", padx=6)
 
     def _build_view_section(self, parent):
         f = ttk.LabelFrame(parent, text="Direzione di vista")
@@ -151,7 +149,7 @@ class UnifiedViewApp(tk.Tk):
     def _build_turbines_section(self, parent):
         f = ttk.LabelFrame(parent, text="Turbine")
         f.pack(fill=tk.X, pady=4)
-        headers = ["ID", "X", "Y", "Z_base", "Tower H", "Rotor D"]
+        headers = ["ID", "X", "Y", "Tower H", "Rotor D"]
         for c, h in enumerate(headers):
             ttk.Label(f, text=h).grid(row=0, column=c, padx=5, pady=3, sticky="w")
 
@@ -160,7 +158,6 @@ class UnifiedViewApp(tk.Tk):
                 "id": tk.StringVar(value=f"WTG{r:02d}"),
                 "x": tk.StringVar(),
                 "y": tk.StringVar(),
-                "z": tk.StringVar(),
                 "th": tk.StringVar(),
                 "rd": tk.StringVar(),
             }
@@ -168,13 +165,13 @@ class UnifiedViewApp(tk.Tk):
             ttk.Entry(f, textvariable=row["id"], width=10).grid(row=r, column=0, padx=3, pady=2)
             ttk.Entry(f, textvariable=row["x"], width=12).grid(row=r, column=1, padx=3, pady=2)
             ttk.Entry(f, textvariable=row["y"], width=12).grid(row=r, column=2, padx=3, pady=2)
-            ttk.Entry(f, textvariable=row["z"], width=10).grid(row=r, column=3, padx=3, pady=2)
-            ttk.Entry(f, textvariable=row["th"], width=10).grid(row=r, column=4, padx=3, pady=2)
-            ttk.Entry(f, textvariable=row["rd"], width=10).grid(row=r, column=5, padx=3, pady=2)
+            ttk.Entry(f, textvariable=row["th"], width=10).grid(row=r, column=3, padx=3, pady=2)
+            ttk.Entry(f, textvariable=row["rd"], width=10).grid(row=r, column=4, padx=3, pady=2)
 
         btns = ttk.Frame(f)
         btns.grid(row=self.MAX_TURBINES + 1, column=0, columnspan=6, sticky="w", pady=6)
         ttk.Button(btns, text="Carica turbine da JSON", command=self._load_turbines_json).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Carica config JSON", command=self._load_config_json).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="Salva config JSON", command=self._save_config_json).pack(side=tk.LEFT, padx=6)
 
     def _pick_geotiff(self):
@@ -196,13 +193,13 @@ class UnifiedViewApp(tk.Tk):
         for i, r in enumerate(self.turbine_rows, start=1):
             if not r["x"].get().strip():
                 continue
-            vals = [r["y"].get().strip(), r["z"].get().strip(), r["th"].get().strip(), r["rd"].get().strip()]
+            vals = [r["y"].get().strip(), r["th"].get().strip(), r["rd"].get().strip()]
             if not all(vals):
                 raise ValueError(f"Riga turbina {i} incompleta")
             out.append(
                 {
                     "id": r["id"].get().strip() or f"WTG{i:02d}",
-                    "base_xyz": [float(r["x"].get()), float(r["y"].get()), float(r["z"].get())],
+                    "base_xyz": [float(r["x"].get()), float(r["y"].get())],
                     "tower_height_m": float(r["th"].get()),
                     "rotor_diameter_m": float(r["rd"].get()),
                 }
@@ -225,11 +222,64 @@ class UnifiedViewApp(tk.Tk):
                 base = t.get("base_xyz", ["", "", ""])
                 r["x"].set(str(base[0]))
                 r["y"].set(str(base[1]))
-                r["z"].set(str(base[2]))
                 r["th"].set(str(t.get("tower_height_m", "")))
                 r["rd"].set(str(t.get("rotor_diameter_m", "")))
             else:
-                for k in ("x", "y", "z", "th", "rd"):
+                for k in ("x", "y", "th", "rd"):
+                    r[k].set("")
+
+    def _load_config_json(self):
+        p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if not p:
+            return
+        with Path(p).open("r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        self.geotiff_path.set(str(cfg.get("dtm", "")))
+
+        observer = cfg.get("observer", {})
+        self.obs_x.set(str(observer.get("x", "")))
+        self.obs_y.set(str(observer.get("y", "")))
+        self.eye_h.set(str(observer.get("eye_height_m", self.eye_h.get())))
+
+        camera = cfg.get("camera", {})
+        self.focal_mm.set(str(camera.get("focal_mm", self.focal_mm.get())))
+        self.sensor_w.set(str(camera.get("sensor_w_mm", self.sensor_w.get())))
+        self.sensor_h.set(str(camera.get("sensor_h_mm", self.sensor_h.get())))
+        self.out_w.set(str(camera.get("width_px", self.out_w.get())))
+        self.out_h.set(str(camera.get("height_px", self.out_h.get())))
+        self.fov_scale.set(str(camera.get("fov_scale", self.fov_scale.get())))
+        self.camera_level.set(bool(camera.get("camera_level", self.camera_level.get())))
+
+        view = cfg.get("view", {})
+        self.view_mode.set(str(view.get("mode", self.view_mode.get())))
+        self.view_az.set(str(view.get("azimuth_deg", self.view_az.get())))
+        self.view_el.set(str(view.get("elevation_deg", self.view_el.get())))
+
+        horizon = cfg.get("horizon", {})
+        self.az_start.set(str(horizon.get("az_start", self.az_start.get())))
+        self.az_end.set(str(horizon.get("az_end", self.az_end.get())))
+        self.az_step.set(str(horizon.get("az_step", self.az_step.get())))
+        self.max_range.set(str(horizon.get("max_range_m", self.max_range.get())))
+        self.sample_step.set(str(horizon.get("step_m", self.sample_step.get())))
+        self.debug_points.set(bool(horizon.get("debug_points", self.debug_points.get())))
+
+        output = cfg.get("output", {})
+        self.output_png.set(str(output.get("camera_png", self.output_png.get())))
+        self.transparent.set(bool(output.get("transparent", self.transparent.get())))
+        self.gen_profile.set(bool(output.get("generate_horizon_profile", self.gen_profile.get())))
+
+        for i, r in enumerate(self.turbine_rows):
+            if i < len(cfg.get("turbines", [])):
+                t = cfg["turbines"][i]
+                base = t.get("base_xyz", ["", ""])
+                r["id"].set(str(t.get("id", f"WTG{i+1:02d}")))
+                r["x"].set(str(base[0]))
+                r["y"].set(str(base[1]))
+                r["th"].set(str(t.get("tower_height_m", "")))
+                r["rd"].set(str(t.get("rotor_diameter_m", "")))
+            else:
+                for k in ("x", "y", "th", "rd"):
                     r[k].set("")
 
     def _save_config_json(self):
@@ -241,8 +291,6 @@ class UnifiedViewApp(tk.Tk):
             "observer": {
                 "x": self.obs_x.get(),
                 "y": self.obs_y.get(),
-                "z": self.obs_z.get(),
-                "z_from_dtm": self.z_from_dtm.get(),
                 "eye_height_m": self.eye_h.get(),
             },
             "camera": {
@@ -252,6 +300,7 @@ class UnifiedViewApp(tk.Tk):
                 "width_px": self.out_w.get(),
                 "height_px": self.out_h.get(),
                 "fov_scale": self.fov_scale.get(),
+                "camera_level": self.camera_level.get(),
             },
             "view": {"mode": self.view_mode.get(), "azimuth_deg": self.view_az.get(), "elevation_deg": self.view_el.get()},
             "horizon": {
@@ -260,6 +309,12 @@ class UnifiedViewApp(tk.Tk):
                 "az_step": self.az_step.get(),
                 "max_range_m": self.max_range.get(),
                 "step_m": self.sample_step.get(),
+                "debug_points": self.debug_points.get(),
+            },
+            "output": {
+                "camera_png": self.output_png.get(),
+                "transparent": self.transparent.get(),
+                "generate_horizon_profile": self.gen_profile.get(),
             },
             "turbines": self._collect_turbines(),
         }
@@ -278,15 +333,18 @@ class UnifiedViewApp(tk.Tk):
             ox = float(self.obs_x.get())
             oy = float(self.obs_y.get())
             eye_h = float(self.eye_h.get())
+            with DTM(geotiff) as dtm:
+                s = dtm.sample_nearest(ox, oy)
+                if s.value is None:
+                    raise ValueError("Observer fuori dal DTM o su nodata")
+                oz = float(s.value) + eye_h
 
-            if self.z_from_dtm.get():
-                with DTM(geotiff) as dtm:
-                    s = dtm.sample_nearest(ox, oy)
-                    if s.value is None:
-                        raise ValueError("Observer fuori dal DTM o su nodata")
-                    oz = float(s.value) + eye_h
-            else:
-                oz = float(self.obs_z.get())
+                for t in turbines:
+                    tx, ty = t["base_xyz"]
+                    ts = dtm.sample_nearest(tx, ty)
+                    if ts.value is None:
+                        raise ValueError(f"Turbina {t['id']} fuori dal DTM o su nodata")
+                    t["base_xyz"] = [tx, ty, float(ts.value)]
 
             az_plot, elev_horizon, _, stats = compute_horizon_profile(
                 dtm_path=geotiff,
