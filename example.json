@@ -1,0 +1,33 @@
+{
+  "camera": {
+    "position_xyz": [0.0, -2000.0, 150.0],
+    "focal_mm": 50.0,
+    "sensor_mm": [36.0, 24.0]
+  },
+  "image": {
+    "width_px": 12000,
+    "height_px": 4000,
+    "crop": { "x": 0, "y": 0, "w": 0, "h": 0 },
+    "fov_scale": 1.0
+  },
+  "turbines": [
+    {
+      "id": "WTG01",
+      "base_xyz": [-250.0, 0.0, 0.0],
+      "tower_height_m": 120.0,
+      "rotor_diameter_m": 150.0
+    },
+    {
+      "id": "WTG02",
+      "base_xyz": [150.0, 700.0, 10.0],
+      "tower_height_m": 110.0,
+      "rotor_diameter_m": 140.0
+    },
+    {
+      "id": "WTG03",
+      "base_xyz": [600.0, 1700.0, 40.0],
+      "tower_height_m": 100.0,
+      "rotor_diameter_m": 120.0
+    }
+  ]
+}
