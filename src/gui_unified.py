@@ -13,7 +13,6 @@ from core.camera_model import camera_pose_from_forward, forward_from_az_el_deg, 
 from core.dtm import DTM
 from core.horizon import azimuth_deg, compute_horizon_profile, elevation_deg, interpolate_horizon_elevation
 from core.render_camera_view import render_camera_view_png
-from core.render_profile import render_horizon_profile_png
 
 
 class UnifiedViewApp(tk.Tk):
@@ -600,6 +599,15 @@ class UnifiedViewApp(tk.Tk):
 
             if self.gen_profile.get():
                 profile_path = out_png.with_name("horizon_profile.png")
+                try:
+                    from core.render_profile import render_horizon_profile_png
+                except ModuleNotFoundError as exc:
+                    missing = exc.name or "dependency"
+                    raise RuntimeError(
+                        f"Impossibile generare horizon_profile: modulo mancante '{missing}'. "
+                        "Installa le dipendenze con: pip install -r requirements.txt"
+                    ) from exc
+
                 render_horizon_profile_png(
                     output_path=profile_path,
                     az_plot=az_plot,
