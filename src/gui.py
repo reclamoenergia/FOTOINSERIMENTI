@@ -41,20 +41,23 @@ class OverlayApp(tk.Tk):
         root = ttk.Frame(self, padding=12)
         root.pack(fill=tk.BOTH, expand=True)
 
-        io_frame = ttk.LabelFrame(root, text="Input")
+        form_container, form_canvas = self._build_scrollable_container(root)
+        self._bind_mousewheel_to_canvas(form_canvas)
+
+        io_frame = ttk.LabelFrame(form_container, text="Input")
         io_frame.pack(fill=tk.X, pady=6)
 
         self._file_picker_row(io_frame, "JSON file", self.json_path, self._pick_json)
         self._file_picker_row(io_frame, "Panoramica master", self.image_path, self._pick_image)
 
-        crop_frame = ttk.LabelFrame(root, text="Crop (opzionale)")
+        crop_frame = ttk.LabelFrame(form_container, text="Crop (opzionale)")
         crop_frame.pack(fill=tk.X, pady=6)
         self._entry_row(crop_frame, "X", self.crop_x, 0)
         self._entry_row(crop_frame, "Y", self.crop_y, 1)
         self._entry_row(crop_frame, "Width", self.crop_w, 2)
         self._entry_row(crop_frame, "Height", self.crop_h, 3)
 
-        options = ttk.LabelFrame(root, text="Parametri")
+        options = ttk.LabelFrame(form_container, text="Parametri")
         options.pack(fill=tk.X, pady=6)
         self._entry_row(options, "FOV scale", self.fov_scale, 0)
         self._entry_row(options, "Line thickness", self.line_thickness, 1)
@@ -66,19 +69,44 @@ class OverlayApp(tk.Tk):
             row=5, column=0, columnspan=2, sticky="w", padx=8, pady=4
         )
 
-        colors = ttk.LabelFrame(root, text="Colori")
+        colors = ttk.LabelFrame(form_container, text="Colori")
         colors.pack(fill=tk.X, pady=6)
         self._entry_row(colors, "Linea", self.line_color, 0)
         self._entry_row(colors, "Cerchio", self.circle_color, 1)
         self._entry_row(colors, "Testo", self.text_color, 2)
 
-        generate_btn = ttk.Button(root, text="Genera Overlay", command=self.generate_overlay)
+        generate_btn = ttk.Button(form_container, text="Genera Overlay", command=self.generate_overlay)
         generate_btn.pack(fill=tk.X, pady=8)
 
         log_frame = ttk.LabelFrame(root, text="Log")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=6)
         self.log_text = tk.Text(log_frame, height=16)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    def _build_scrollable_container(self, parent: ttk.Frame) -> tuple[ttk.Frame, tk.Canvas]:
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(wrapper, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(wrapper, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        content = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        content.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        return content, canvas
+
+    def _bind_mousewheel_to_canvas(self, canvas: tk.Canvas) -> None:
+        def _on_mousewheel(event: tk.Event) -> None:
+            if event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _file_picker_row(self, parent: ttk.LabelFrame, label: str, var: tk.StringVar, command) -> None:
         row = parent.grid_size()[1]
@@ -209,4 +237,3 @@ class OverlayApp(tk.Tk):
 if __name__ == "__main__":
     app = OverlayApp()
     app.mainloop()
-
