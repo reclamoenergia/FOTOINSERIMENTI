@@ -79,7 +79,11 @@ def render_camera_view_png(
         )
         if in_frame:
             inside.append(tid)
-            draw.text((uh + 8, vh - 8), tid, fill=(255, 255, 255, 255))
+            label = tid
+            visible_height_m = float(t.get("visible_height_m", 0.0) or 0.0)
+            if visible_height_m > 0.0:
+                label = f"{tid} | altezza visibile m {visible_height_m:.1f}"
+            draw.text((uh + 8, vh - 8), label, fill=(255, 255, 255, 255))
         else:
             outside.append(tid)
 
