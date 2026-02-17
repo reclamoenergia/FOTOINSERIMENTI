@@ -1,8 +1,8 @@
 # WTG Overlay Generator (Aerogeneratori)
 
-Applicazione desktop Python con GUI (Tkinter) per generare un `overlay.png` trasparente da sovrapporre a panoramiche fotografiche.
+Applicazione desktop Python con GUI (Tkinter) per generare overlay PNG trasparenti da sovrapporre a panoramiche fotografiche.
 
-## Funzionalità
+## Funzionalità principali (Overlay turbine)
 
 - Proiezione pinhole coerente con coordinate 3D del mondo.
 - Look-at automatico camera -> centroide dei mozzi turbine.
@@ -19,67 +19,109 @@ project/
 │   ├── core/
 │   │   ├── camera.py
 │   │   ├── projection.py
-│   │   └── overlay_renderer.py
+│   │   ├── overlay_renderer.py
+│   │   ├── dtm_sampler.py
+│   │   ├── horizon.py
+│   │   └── horizon_plot.py
 │   ├── gui.py
+│   ├── gui_horizon.py
+│   ├── gui_unified.py
 │   └── main.py
+├── docs/
+│   └── wtg_unified_algorithm.md
 ├── example.json
 ├── README.md
 ├── requirements.txt
 └── build_scripts/
-    └── build_windows.bat
-```
-
-## Installazione
-
-```bash
+    ├── build_windows.bat
+    └── hooks/
+        └── hook-rasterio.py
+Installazione
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install pyinstaller
-```
-
-## Esecuzione (sviluppo)
-
-```bash
+Tool 1: Overlay turbine su panoramica
+Avvio GUI
 python src/gui.py
-```
+Input JSON
+Vedi example.json per lo schema completo.
 
-## Input JSON
+Regole crop
+Se crop.w <= 0 o crop.h <= 0 viene generato overlay su immagine master.
 
-Vedi `example.json` per lo schema completo.
+Se il crop è attivo, l'overlay viene generato con dimensione crop.w x crop.h e viene applicato offset (u-crop.x, v-crop.y).
 
-## Regole crop
+Output
+overlay.png (trasparente nelle aree senza disegni)
 
-- Se `crop.w <= 0` o `crop.h <= 0` viene generato overlay su immagine master.
-- Se il crop è attivo, l'overlay viene generato con dimensione `crop.w x crop.h` e viene applicato offset `(u-crop.x, v-crop.y)`.
+report nel pannello log GUI con:
 
-## Build Windows (.exe)
+turbine processate
 
-```bat
+turbine disegnate
+
+turbine scartate + motivo
+
+Tool 2: Orizzonte (DEM/DTM -> PNG)
+Tool dedicato per generare il profilo orizzonte da GeoTIFF e sovrapporre turbine.
+
+Moduli
+src/core/dtm_sampler.py: campionamento quote su GeoTIFF (bilineare con fallback nearest).
+
+src/core/horizon.py: calcolo skyline, angoli turbine, marker direzione vista.
+
+src/core/horizon_plot.py: rendering Matplotlib del PNG (horizon.png).
+
+src/gui_horizon.py: GUI Tkinter per lanciare il tool inserendo i parametri turbine direttamente a interfaccia (max 5).
+
+Avvio GUI orizzonte
+python src/gui_horizon.py
+Schema JSON supportato (esempio)
+{
+  "dtm": {"geotiff_path": "path/to/dtm.tif"},
+  "observer": {"position_xyz": [281915, 4832489, 655], "eye_height_m": 1.6},
+  "azimuth": {"start_deg": 350.0, "end_deg": 20.0, "step_deg": 0.2},
+  "range": {"max_m": 30000, "step_m": 0},
+  "view_direction": {"mode": "centroid"},
+  "turbines": [
+    {
+      "id": "WTG01",
+      "base_xyz": [283116.0, 4832098.0, 867.0],
+      "tower_height_m": 119.0,
+      "rotor_diameter_m": 162.0
+    }
+  ],
+  "output": {"png_path": "horizon.png", "transparent": false}
+}
+range.step_m = 0 usa automaticamente il pixel size del DTM.
+
+Tool 3: Unified Camera View
+GUI principale in src/gui_unified.py per generare camera_view.png (skyline + turbine in prospettiva) e opzionalmente horizon_profile.png.
+
+Avvio
+python src/gui_unified.py
+Note operative
+Salvataggio/caricamento configurazione JSON supporta tutti i parametri GUI.
+
+Quota osservatore calcolata da DTM: Z = DTM(X,Y) + eye_height.
+
+Quota base di ogni WTG calcolata da DTM in (X,Y).
+
+Descrizione algoritmo in docs/wtg_unified_algorithm.md.
+
+Build Windows (.exe)
+Build Overlay (gui.py)
 build_scripts\build_windows.bat
-```
+Lo script usa PyInstaller con hook dedicato (build_scripts/hooks/hook-rasterio.py) e flag espliciti per rasterio:
 
-Lo script usa PyInstaller con hook dedicato (`build_scripts/hooks/hook-rasterio.py`) e flag espliciti per rasterio:
-
-```bat
 pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
-```
-
-## Troubleshooting packaging
-
+Build Unified (gui_unified.py)
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
+Troubleshooting packaging
 Se all'avvio dell'exe compare errore simile a:
 
-```text
 ModuleNotFoundError: No module named 'rasterio.sample'
-```
-
-ricostruire l'exe nello stesso ambiente Python in cui `rasterio` è installato e usare lo script `build_scripts\build_windows.bat` aggiornato (include hook + hidden-import/collect-submodules/data). Se il problema persiste, cancellare `build/` e `dist/` prima di ricompilare.
-
-## Output
-
-- `overlay.png` (trasparente nelle aree senza disegni)
-- report nel pannello log GUI con:
-  - turbine processate
-  - turbine disegnate
-  - turbine scartate + motivo
+ricostruire l'exe nello stesso ambiente Python in cui rasterio è installato, usando i flag/hook sopra.
+Se il problema persiste, cancellare build/ e dist/ prima di ricompilare.
 
