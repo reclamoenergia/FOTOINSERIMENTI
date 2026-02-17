@@ -41,7 +41,10 @@ class HorizonApp(tk.Tk):
         root = ttk.Frame(self, padding=12)
         root.pack(fill=tk.BOTH, expand=True)
 
-        io = ttk.LabelFrame(root, text="Input / Output")
+        form_container, form_canvas = self._build_scrollable_container(root)
+        self._bind_mousewheel_to_canvas(form_canvas)
+
+        io = ttk.LabelFrame(form_container, text="Input / Output")
         io.pack(fill=tk.X, pady=6)
 
         ttk.Label(io, text="GeoTIFF").grid(row=0, column=0, sticky="w", padx=8, pady=5)
@@ -57,7 +60,7 @@ class HorizonApp(tk.Tk):
         )
         io.columnconfigure(1, weight=1)
 
-        observer = ttk.LabelFrame(root, text="Posizione osservatore")
+        observer = ttk.LabelFrame(form_container, text="Posizione osservatore")
         observer.pack(fill=tk.X, pady=6)
 
         ttk.Label(observer, text="X").grid(row=0, column=0, sticky="w", padx=8, pady=5)
@@ -69,7 +72,7 @@ class HorizonApp(tk.Tk):
         ttk.Label(observer, text="Eye height (m)").grid(row=0, column=6, sticky="w", padx=8, pady=5)
         ttk.Entry(observer, textvariable=self.eye_height_m, width=10).grid(row=0, column=7, padx=8, pady=5)
 
-        azimuth = ttk.LabelFrame(root, text="Intervallo azimut")
+        azimuth = ttk.LabelFrame(form_container, text="Intervallo azimut")
         azimuth.pack(fill=tk.X, pady=6)
 
         ttk.Label(azimuth, text="Start (°)").grid(row=0, column=0, sticky="w", padx=8, pady=5)
@@ -84,11 +87,11 @@ class HorizonApp(tk.Tk):
         ttk.Label(azimuth, text="Step campionamento (m)").grid(row=1, column=2, sticky="w", padx=8, pady=5)
         ttk.Entry(azimuth, textvariable=self.step_m, width=12).grid(row=1, column=3, padx=8, pady=5)
 
-        turbines = ttk.LabelFrame(root, text="Turbine (max 5)")
+        turbines = ttk.LabelFrame(form_container, text="Turbine (max 5)")
         turbines.pack(fill=tk.X, pady=6)
         self._build_turbines_table(turbines)
 
-        buttons = ttk.Frame(root)
+        buttons = ttk.Frame(form_container)
         buttons.pack(fill=tk.X, pady=6)
         ttk.Button(buttons, text="Genera PNG", command=self.generate).pack(side=tk.LEFT)
 
@@ -96,6 +99,32 @@ class HorizonApp(tk.Tk):
         log_frame.pack(fill=tk.BOTH, expand=True, pady=6)
         self.log = tk.Text(log_frame, height=16)
         self.log.pack(fill=tk.BOTH, expand=True)
+
+
+    def _build_scrollable_container(self, parent: ttk.Frame) -> tuple[ttk.Frame, tk.Canvas]:
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(wrapper, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(wrapper, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        content = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        content.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        return content, canvas
+
+    def _bind_mousewheel_to_canvas(self, canvas: tk.Canvas) -> None:
+        def _on_mousewheel(event: tk.Event) -> None:
+            if event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _pick_geotiff(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("GeoTIFF", "*.tif *.tiff"), ("All files", "*.*")])
