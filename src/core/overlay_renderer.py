@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -79,7 +79,10 @@ def _as_vector3(values: Any, field_name: str) -> Vector3:
     return (float(values[0]), float(values[1]), float(values[2]))
 
 
-def parse_scene_payload(payload: Dict[str, Any]) -> SceneConfig:
+def load_scene_config(json_path: str | Path) -> SceneConfig:
+    with open(json_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
     camera = payload.get("camera", {})
     image = payload.get("image", {})
     turbines_data = payload.get("turbines", [])
@@ -119,12 +122,6 @@ def parse_scene_payload(payload: Dict[str, Any]) -> SceneConfig:
     )
 
 
-def load_scene_config(json_path: str | Path) -> SceneConfig:
-    with open(json_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-    return parse_scene_payload(payload)
-
-
 def _centroid(points: List[Vector3]) -> Vector3:
     n = len(points)
     if n == 0:
@@ -139,6 +136,24 @@ def _in_frame(u: float, v: float, width: int, height: int) -> bool:
     return 0 <= u < width and 0 <= v < height
 
 
+def _validate_scene(scene: SceneConfig, width: int, height: int) -> None:
+    if width <= 0 or height <= 0:
+        raise ValueError("Image dimensions must be positive")
+    if scene.focal_mm <= 0:
+        raise ValueError("camera.focal_mm must be > 0")
+    if scene.sensor_mm[0] <= 0 or scene.sensor_mm[1] <= 0:
+        raise ValueError("camera.sensor_mm values must be > 0")
+    if scene.fov_scale <= 0:
+        raise ValueError("image.fov_scale must be > 0")
+    if not scene.turbines:
+        raise ValueError("No turbines in input")
+
+    if scene.crop.x < 0 or scene.crop.y < 0 or scene.crop.w < 0 or scene.crop.h < 0:
+        raise ValueError("crop values must be >= 0")
+    if scene.crop.enabled and (scene.crop.x + scene.crop.w > width or scene.crop.y + scene.crop.h > height):
+        raise ValueError("crop rectangle exceeds image bounds")
+
+
 def render_overlay(
     scene: SceneConfig,
     output_path: str | Path,
@@ -149,10 +164,7 @@ def render_overlay(
     width = image_override_size[0] if image_override_size else scene.image_width
     height = image_override_size[1] if image_override_size else scene.image_height
 
-    if width <= 0 or height <= 0:
-        raise ValueError("Image dimensions must be positive")
-    if not scene.turbines:
-        raise ValueError("No turbines in input")
+    _validate_scene(scene, width, height)
 
     hub_points = [
         (t.base_xyz[0], t.base_xyz[1], t.base_xyz[2] + t.tower_height_m) for t in scene.turbines
@@ -190,13 +202,15 @@ def render_overlay(
             skipped_items.append(RenderLogEntry(turbine.turbine_id, "dietro camera"))
             continue
 
-        u_base, v_base = base_proj.pixel
-        u_hub, v_hub = hub_proj.pixel
-
+        if turbine.tower_height_m <= 0:
+            skipped_items.append(RenderLogEntry(turbine.turbine_id, "altezza torre non valida"))
+            continue
         if turbine.rotor_diameter_m <= 0:
             skipped_items.append(RenderLogEntry(turbine.turbine_id, "rotore non valido"))
             continue
 
+        u_base, v_base = base_proj.pixel
+        u_hub, v_hub = hub_proj.pixel
         radius_px = intrinsics.fx * ((turbine.rotor_diameter_m / 2.0) / hub_proj.depth)
 
         if scene.crop.enabled:
@@ -224,7 +238,7 @@ def render_overlay(
         draw.line(
             [(u_base, v_base), (u_hub, v_hub)],
             fill=style.line_color,
-            width=style.line_thickness,
+            width=max(1, style.line_thickness),
         )
 
         draw.ellipse(
@@ -233,7 +247,7 @@ def render_overlay(
                 (u_hub + radius_px, v_hub + radius_px),
             ],
             outline=style.circle_color,
-            width=style.circle_thickness,
+            width=max(1, style.circle_thickness),
         )
 
         if style.draw_ids:
