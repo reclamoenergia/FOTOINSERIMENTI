@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from .camera_model import CameraIntrinsics, CameraPose, project_point
 
@@ -37,6 +37,10 @@ def render_camera_view_png(
     bg = (0, 0, 0, 0) if transparent else (0, 0, 0, 255)
     im = Image.new(mode, (intr.width_px, intr.height_px), bg)
     draw = ImageDraw.Draw(im)
+    try:
+        label_font = ImageFont.truetype("DejaVuSans.ttf", 20)
+    except OSError:
+        label_font = ImageFont.load_default()
 
     # Skyline projected by angular offsets.
     pts: list[tuple[float, float]] = []
@@ -79,11 +83,16 @@ def render_camera_view_png(
         )
         if in_frame:
             inside.append(tid)
-            label = tid
+            base_quota_m = float(base[2])
+            tip_quota_m = base_quota_m + float(t["tower_height_m"]) + rotor_r
             visible_height_m = float(t.get("visible_height_m", 0.0) or 0.0)
-            if visible_height_m > 0.0:
-                label = f"{tid} | altezza visibile m {visible_height_m:.1f}"
-            draw.text((uh + 8, vh - 8), label, fill=(255, 255, 255, 255))
+            label = (
+                f"{tid}\n"
+                f"quota base: {base_quota_m:.1f} m\n"
+                f"quota tip: {tip_quota_m:.1f} m\n"
+                f"altezza sporgente: {visible_height_m:.1f} m"
+            )
+            draw.text((uh + 10, vh - 12), label, fill=(255, 255, 255, 255), font=label_font)
         else:
             outside.append(tid)
 
