@@ -628,11 +628,17 @@ class UnifiedViewApp(tk.Tk):
                 e_hub = elevation_deg(oz, bz + t["tower_height_m"], d)
                 e_tip = elevation_deg(oz, bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5, d)
                 e_hor = interpolate_horizon_elevation(az_plot, elev_horizon, az)
+                peak_elev = float(t.get("section_peak_elev_deg", float("nan")))
+                peak_quota = oz + math.tan(math.radians(peak_elev)) * d if math.isfinite(peak_elev) and peak_elev > -89.999 else float("nan")
+                tip_quota = bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5
                 self._append(
-                    f"{tid}: az={az:.2f} elev_base={e_base:.2f} elev_hub={e_hub:.2f} elev_tip={e_tip:.2f} elev_horizon={e_hor:.2f}"
+                    f"{tid}: az={az:.2f} elev_base={e_base:.2f}° elev_hub={e_hub:.2f}° elev_tip={e_tip:.2f}° elev_horizon={e_hor:.2f}°"
                 )
                 self._append(
-                    f"{tid}: picco_sezione={t.get('section_peak_elev_deg', float('nan')):.2f} tip={t.get('tip_elev_deg', float('nan')):.2f} altezza_visibile_m={t.get('visible_height_m', 0.0):.2f}"
+                    f"{tid}: elev_picco_sezione={peak_elev:.2f}° elev_tip={t.get('tip_elev_deg', float('nan')):.2f}° altezza_visibile={t.get('visible_height_m', 0.0):.2f} m"
+                )
+                self._append(
+                    f"{tid}: quota_osservatore={oz:.2f} m quota_base={bz:.2f} m quota_tip={tip_quota:.2f} m quota_picco_sezione={peak_quota:.2f} m"
                 )
 
             dt = time.perf_counter() - t0
