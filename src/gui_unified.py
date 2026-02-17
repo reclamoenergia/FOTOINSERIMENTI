@@ -509,6 +509,46 @@ class UnifiedViewApp(tk.Tk):
                         raise ValueError(f"Turbina {t['id']} fuori dal DTM o su nodata")
                     t["base_xyz"] = [tx, ty, float(ts.value)]
 
+                los_step = float(self.sample_step.get())
+                for t in turbines:
+                    tx, ty, bz = t["base_xyz"]
+                    d = float(np.hypot(tx - ox, ty - oy))
+                    if d <= 1e-6:
+                        t["visible_height_m"] = 0.0
+                        t["section_peak_elev_deg"] = float("-inf")
+                        t["tip_elev_deg"] = float("-inf")
+                        continue
+
+                    sample_step = los_step if los_step > 0 else dtm.pixel_size
+                    if sample_step <= 0:
+                        sample_step = max(d, 1.0)
+
+                    ux = (tx - ox) / d
+                    uy = (ty - oy) / d
+                    peak_elev = -90.0
+
+                    for sd in np.arange(sample_step, d, sample_step, dtype=float):
+                        sx = ox + ux * float(sd)
+                        sy = oy + uy * float(sd)
+                        ss = dtm.sample_nearest(sx, sy)
+                        if ss.value is None:
+                            continue
+                        selev = elevation_deg(oz, float(ss.value), float(sd))
+                        if selev > peak_elev:
+                            peak_elev = selev
+
+                    tip_z = float(bz) + float(t["tower_height_m"]) + float(t["rotor_diameter_m"]) * 0.5
+                    tip_elev = elevation_deg(oz, tip_z, d)
+                    if tip_elev > peak_elev:
+                        z_on_peak_ray = oz + math.tan(math.radians(peak_elev)) * d
+                        visible_height = max(0.0, tip_z - z_on_peak_ray)
+                    else:
+                        visible_height = 0.0
+
+                    t["visible_height_m"] = visible_height
+                    t["section_peak_elev_deg"] = peak_elev
+                    t["tip_elev_deg"] = tip_elev
+
             az_plot, elev_horizon, _, stats = compute_horizon_profile(
                 dtm_path=geotiff,
                 observer_xy=(ox, oy),
@@ -590,6 +630,9 @@ class UnifiedViewApp(tk.Tk):
                 e_hor = interpolate_horizon_elevation(az_plot, elev_horizon, az)
                 self._append(
                     f"{tid}: az={az:.2f} elev_base={e_base:.2f} elev_hub={e_hub:.2f} elev_tip={e_tip:.2f} elev_horizon={e_hor:.2f}"
+                )
+                self._append(
+                    f"{tid}: picco_sezione={t.get('section_peak_elev_deg', float('nan')):.2f} tip={t.get('tip_elev_deg', float('nan')):.2f} altezza_visibile_m={t.get('visible_height_m', 0.0):.2f}"
                 )
 
             dt = time.perf_counter() - t0
