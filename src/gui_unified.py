@@ -3,17 +3,18 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import re
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
+import rasterio
 
 from core.camera_model import camera_pose_from_forward, forward_from_az_el_deg, intrinsics_from_photo
 from core.dtm import DTM
 from core.horizon import azimuth_deg, compute_horizon_profile, elevation_deg, interpolate_horizon_elevation
 from core.render_camera_view import render_camera_view_png
-from core.render_profile import render_horizon_profile_png
 
 
 class UnifiedViewApp(tk.Tk):
@@ -22,7 +23,7 @@ class UnifiedViewApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("WTG Unified View")
-        self.geometry("1250x930")
+        self.geometry("1250x980")
 
         self._init_vars()
         self._build_ui()
@@ -32,6 +33,10 @@ class UnifiedViewApp(tk.Tk):
         self.output_png = tk.StringVar(value="camera_view.png")
         self.transparent = tk.BooleanVar(value=False)
         self.gen_profile = tk.BooleanVar(value=False)
+
+        self.batch_mode = tk.BooleanVar(value=False)
+        self.batch_shapefile = tk.StringVar()
+        self.batch_output_dir = tk.StringVar()
 
         self.focal_mm = tk.StringVar(value="50")
         self.sensor_w = tk.StringVar(value="36")
@@ -81,10 +86,16 @@ class UnifiedViewApp(tk.Tk):
         btns.pack(fill=tk.X, pady=8)
         ttk.Button(btns, text="Genera vista", command=self.generate).pack(side=tk.LEFT)
 
+        self.progress = ttk.Progressbar(form_container, mode="determinate")
+        self.progress.pack(fill=tk.X, pady=(0, 8))
+
         log_box = ttk.LabelFrame(root, text="Log")
         log_box.pack(fill=tk.BOTH, expand=True, pady=6)
         self.log = tk.Text(log_box, height=12)
         self.log.pack(fill=tk.BOTH, expand=True)
+
+        self.batch_mode.trace_add("write", lambda *_: self._update_batch_ui_state())
+        self._update_batch_ui_state()
 
     def _build_scrollable_container(self, parent: ttk.Frame) -> tuple[ttk.Frame, tk.Canvas]:
         wrapper = ttk.Frame(parent)
@@ -123,6 +134,23 @@ class UnifiedViewApp(tk.Tk):
         ttk.Button(f, text="Salva come", command=self._pick_output_png).grid(row=1, column=2, padx=6, pady=4)
         ttk.Checkbutton(f, text="Sfondo trasparente", variable=self.transparent).grid(row=2, column=1, sticky="w", padx=6)
         ttk.Checkbutton(f, text="Genera anche horizon_profile.png", variable=self.gen_profile).grid(row=3, column=1, sticky="w", padx=6)
+
+        ttk.Separator(f, orient=tk.HORIZONTAL).grid(row=4, column=0, columnspan=3, sticky="ew", padx=6, pady=(8, 6))
+        ttk.Checkbutton(f, text="Batch shapefile", variable=self.batch_mode).grid(row=5, column=0, sticky="w", padx=6, pady=4)
+
+        self.batch_shp_label = ttk.Label(f, text="Shapefile punti")
+        self.batch_shp_label.grid(row=6, column=0, sticky="w", padx=6, pady=4)
+        self.batch_shp_entry = ttk.Entry(f, textvariable=self.batch_shapefile, width=70)
+        self.batch_shp_entry.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
+        self.batch_shp_btn = ttk.Button(f, text="Sfoglia", command=self._pick_batch_shapefile)
+        self.batch_shp_btn.grid(row=6, column=2, padx=6, pady=4)
+
+        self.batch_out_label = ttk.Label(f, text="Cartella output batch")
+        self.batch_out_label.grid(row=7, column=0, sticky="w", padx=6, pady=4)
+        self.batch_out_entry = ttk.Entry(f, textvariable=self.batch_output_dir, width=70)
+        self.batch_out_entry.grid(row=7, column=1, sticky="ew", padx=6, pady=4)
+        self.batch_out_btn = ttk.Button(f, text="Seleziona", command=self._pick_batch_output_dir)
+        self.batch_out_btn.grid(row=7, column=2, padx=6, pady=4)
         f.columnconfigure(1, weight=1)
 
     def _build_camera_section(self, parent):
@@ -139,14 +167,18 @@ class UnifiedViewApp(tk.Tk):
         for label, var, r, c in entries:
             ttk.Label(f, text=label).grid(row=r, column=c, sticky="w", padx=6, pady=4)
             ttk.Entry(f, textvariable=var, width=12).grid(row=r, column=c + 1, padx=6, pady=4, sticky="w")
-        ttk.Checkbutton(f, text="Camera in bolla", variable=self.camera_level).grid(row=2, column=0, sticky="w", padx=6, pady=4)
 
     def _build_observer_section(self, parent):
         f = ttk.LabelFrame(parent, text="Osservatore")
         f.pack(fill=tk.X, pady=4)
-        for i, (label, var) in enumerate((("Observer X", self.obs_x), ("Observer Y", self.obs_y), ("Eye height", self.eye_h))):
-            ttk.Label(f, text=label).grid(row=0, column=i * 2, sticky="w", padx=6, pady=4)
-            ttk.Entry(f, textvariable=var, width=12).grid(row=0, column=i * 2 + 1, padx=6, pady=4, sticky="w")
+        ttk.Label(f, text="Observer X").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        self.obs_x_entry = ttk.Entry(f, textvariable=self.obs_x, width=14)
+        self.obs_x_entry.grid(row=0, column=1, padx=6, pady=4, sticky="w")
+        ttk.Label(f, text="Observer Y").grid(row=0, column=2, sticky="w", padx=6, pady=4)
+        self.obs_y_entry = ttk.Entry(f, textvariable=self.obs_y, width=14)
+        self.obs_y_entry.grid(row=0, column=3, padx=6, pady=4, sticky="w")
+        ttk.Label(f, text="Eye height (m)").grid(row=0, column=4, sticky="w", padx=6, pady=4)
+        ttk.Entry(f, textvariable=self.eye_h, width=12).grid(row=0, column=5, padx=6, pady=4, sticky="w")
         ttk.Label(f, text="Quota osservatore = DTM(X,Y) + eye height").grid(row=1, column=0, columnspan=4, sticky="w", padx=6)
 
     def _build_view_section(self, parent):
@@ -200,24 +232,13 @@ class UnifiedViewApp(tk.Tk):
 
         stats_row = self.MAX_TURBINES + 1
         ttk.Label(f, text="Azimuth min").grid(row=stats_row, column=4, sticky="e", padx=5, pady=(8, 2))
-        ttk.Entry(f, textvariable=self.azimuth_min, width=12, state="readonly").grid(
-            row=stats_row, column=5, sticky="w", padx=5, pady=(8, 2)
-        )
+        ttk.Entry(f, textvariable=self.azimuth_min, width=12, state="readonly").grid(row=stats_row, column=5, sticky="w", padx=5, pady=(8, 2))
         ttk.Label(f, text="Azimuth max").grid(row=stats_row + 1, column=4, sticky="e", padx=5, pady=(2, 6))
-        ttk.Entry(f, textvariable=self.azimuth_max, width=12, state="readonly").grid(
-            row=stats_row + 1, column=5, sticky="w", padx=5, pady=(2, 6)
-        )
+        ttk.Entry(f, textvariable=self.azimuth_max, width=12, state="readonly").grid(row=stats_row + 1, column=5, sticky="w", padx=5, pady=(2, 6))
 
         plot_frame = ttk.LabelFrame(f, text="Grafico osservatore / WTG")
         plot_frame.grid(row=stats_row, column=0, columnspan=4, rowspan=2, sticky="nsew", padx=5, pady=6)
-        self.position_canvas = tk.Canvas(
-            plot_frame,
-            width=520,
-            height=220,
-            bg="white",
-            highlightthickness=1,
-            highlightbackground="#cfcfcf",
-        )
+        self.position_canvas = tk.Canvas(plot_frame, width=520, height=220, bg="white", highlightthickness=1, highlightbackground="#cfcfcf")
         self.position_canvas.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
         btns = ttk.Frame(f)
@@ -240,6 +261,41 @@ class UnifiedViewApp(tk.Tk):
     @staticmethod
     def _azimuth_deg(x0: float, y0: float, xt: float, yt: float) -> float:
         return (math.degrees(math.atan2(xt - x0, yt - y0)) + 360.0) % 360.0
+
+    @staticmethod
+    def _sanitize_name(raw: str, index: int) -> str:
+        text = (raw or "").strip().replace(" ", "_")
+        text = re.sub(r'[\\/:*?"<>|]', "", text)
+        text = re.sub(r"_+", "_", text).strip("._")
+        return text or f"POINT_{index:03d}"
+
+    @staticmethod
+    def _compute_batch_azimuth_range(ox: float, oy: float, turbines: list[dict]) -> tuple[float, float, float]:
+        az_list = [UnifiedViewApp._azimuth_deg(ox, oy, float(t["base_xyz"][0]), float(t["base_xyz"][1])) for t in turbines]
+        radians = np.radians(np.array(az_list, dtype=float))
+        sum_x = float(np.cos(radians).sum())
+        sum_y = float(np.sin(radians).sum())
+        az_center_deg = (math.degrees(math.atan2(sum_y, sum_x)) + 360.0) % 360.0
+        az_start = az_center_deg - 90.0
+        az_end = az_center_deg + 90.0
+        return az_center_deg, az_start, az_end
+
+    def _update_batch_ui_state(self) -> None:
+        batch_on = self.batch_mode.get()
+        entry_state = "disabled" if batch_on else "normal"
+        self.obs_x_entry.configure(state=entry_state)
+        self.obs_y_entry.configure(state=entry_state)
+
+        widgets = [
+            self.batch_shp_label,
+            self.batch_shp_entry,
+            self.batch_shp_btn,
+            self.batch_out_label,
+            self.batch_out_entry,
+            self.batch_out_btn,
+        ]
+        for w in widgets:
+            w.configure(state="normal" if batch_on else "disabled")
 
     def _bind_live_updates(self) -> None:
         tracked_vars: list[tk.Variable] = [self.obs_x, self.obs_y]
@@ -347,9 +403,20 @@ class UnifiedViewApp(tk.Tk):
         if p:
             self.output_png.set(p)
 
+    def _pick_batch_shapefile(self):
+        p = filedialog.askopenfilename(filetypes=[("Shapefile", "*.shp"), ("All", "*.*")])
+        if p:
+            self.batch_shapefile.set(p)
+
+    def _pick_batch_output_dir(self):
+        p = filedialog.askdirectory()
+        if p:
+            self.batch_output_dir.set(p)
+
     def _append(self, s: str):
         self.log.insert(tk.END, s + "\n")
         self.log.see(tk.END)
+        self.update_idletasks()
 
     def _collect_turbines(self) -> list[dict]:
         out: list[dict] = []
@@ -381,7 +448,7 @@ class UnifiedViewApp(tk.Tk):
         for i, r in enumerate(self.turbine_rows):
             if i < len(turbines):
                 t = turbines[i]
-                r["id"].set(str(t.get("id", f"WTG{i+1:02d}")))
+                r["id"].set(str(t.get("id", f"WTG{i + 1:02d}")))
                 base = t.get("base_xyz", ["", "", ""])
                 r["x"].set(str(base[0]))
                 r["y"].set(str(base[1]))
@@ -399,62 +466,70 @@ class UnifiedViewApp(tk.Tk):
             cfg = json.load(f)
 
         self.geotiff_path.set(str(cfg.get("dtm", "")))
-
         observer = cfg.get("observer", {})
         self.obs_x.set(str(observer.get("x", "")))
         self.obs_y.set(str(observer.get("y", "")))
-        self.eye_h.set(str(observer.get("eye_height_m", self.eye_h.get())))
+        self.eye_h.set(str(observer.get("eye_height", "1.6")))
 
         camera = cfg.get("camera", {})
-        self.focal_mm.set(str(camera.get("focal_mm", self.focal_mm.get())))
-        self.sensor_w.set(str(camera.get("sensor_w_mm", self.sensor_w.get())))
-        self.sensor_h.set(str(camera.get("sensor_h_mm", self.sensor_h.get())))
-        self.out_w.set(str(camera.get("width_px", self.out_w.get())))
-        self.out_h.set(str(camera.get("height_px", self.out_h.get())))
-        self.fov_scale.set(str(camera.get("fov_scale", self.fov_scale.get())))
-        self.camera_level.set(bool(camera.get("camera_level", self.camera_level.get())))
+        self.focal_mm.set(str(camera.get("focal_mm", "50")))
+        self.sensor_w.set(str(camera.get("sensor_w_mm", "36")))
+        self.sensor_h.set(str(camera.get("sensor_h_mm", "24")))
+        self.out_w.set(str(camera.get("width_px", "4000")))
+        self.out_h.set(str(camera.get("height_px", "3000")))
+        self.fov_scale.set(str(camera.get("fov_scale", "1.0")))
 
         view = cfg.get("view", {})
-        self.view_mode.set(str(view.get("mode", self.view_mode.get())))
-        self.view_az.set(str(view.get("azimuth_deg", self.view_az.get())))
-        self.view_el.set(str(view.get("elevation_deg", self.view_el.get())))
+        self.view_mode.set(str(view.get("mode", "auto")))
+        self.view_az.set(str(view.get("azimuth_deg", "0.0")))
+        self.view_el.set(str(view.get("elevation_deg", "0.0")))
 
-        horizon = cfg.get("horizon", {})
-        self.az_start.set(str(horizon.get("az_start", self.az_start.get())))
-        self.az_end.set(str(horizon.get("az_end", self.az_end.get())))
-        self.az_step.set(str(horizon.get("az_step", self.az_step.get())))
-        self.max_range.set(str(horizon.get("max_range_m", self.max_range.get())))
-        self.sample_step.set(str(horizon.get("step_m", self.sample_step.get())))
-        self.debug_points.set(bool(horizon.get("debug_points", self.debug_points.get())))
+        hz = cfg.get("horizon", {})
+        self.az_start.set(str(hz.get("az_start", "330")))
+        self.az_end.set(str(hz.get("az_end", "30")))
+        self.az_step.set(str(hz.get("az_step", "0.5")))
+        self.max_range.set(str(hz.get("max_range_m", "30000")))
+        self.sample_step.set(str(hz.get("sample_step_m", "0")))
+        self.debug_points.set(bool(hz.get("debug_points", False)))
 
         output = cfg.get("output", {})
-        self.output_png.set(str(output.get("camera_png", self.output_png.get())))
-        self.transparent.set(bool(output.get("transparent", self.transparent.get())))
+        self.output_png.set(str(output.get("camera_png", "camera_view.png")))
+        self.transparent.set(bool(output.get("transparent", False)))
         self.gen_profile.set(bool(output.get("generate_horizon_profile", self.gen_profile.get())))
 
+        batch = cfg.get("batch", {})
+        self.batch_mode.set(bool(batch.get("enabled", False)))
+        self.batch_shapefile.set(str(batch.get("shapefile", "")))
+        self.batch_output_dir.set(str(batch.get("output_dir", "")))
+
+        turbines = cfg.get("turbines", [])
         for i, r in enumerate(self.turbine_rows):
-            if i < len(cfg.get("turbines", [])):
-                t = cfg["turbines"][i]
-                base = t.get("base_xyz", ["", ""])
-                r["id"].set(str(t.get("id", f"WTG{i+1:02d}")))
+            if i < len(turbines):
+                t = turbines[i]
+                r["id"].set(str(t.get("id", f"WTG{i + 1:02d}")))
+                base = t.get("base_xyz", ["", "", ""])
                 r["x"].set(str(base[0]))
                 r["y"].set(str(base[1]))
                 r["th"].set(str(t.get("tower_height_m", "")))
                 r["rd"].set(str(t.get("rotor_diameter_m", "")))
             else:
-                for k in ("x", "y", "th", "rd"):
-                    r[k].set("")
+                for k in ("id", "x", "y", "th", "rd"):
+                    if k == "id":
+                        r[k].set(f"WTG{i + 1:02d}")
+                    else:
+                        r[k].set("")
 
     def _save_config_json(self):
         p = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
         if not p:
             return
+
         cfg = {
             "dtm": self.geotiff_path.get(),
             "observer": {
                 "x": self.obs_x.get(),
                 "y": self.obs_y.get(),
-                "eye_height_m": self.eye_h.get(),
+                "eye_height": self.eye_h.get(),
             },
             "camera": {
                 "focal_mm": self.focal_mm.get(),
@@ -463,15 +538,18 @@ class UnifiedViewApp(tk.Tk):
                 "width_px": self.out_w.get(),
                 "height_px": self.out_h.get(),
                 "fov_scale": self.fov_scale.get(),
-                "camera_level": self.camera_level.get(),
             },
-            "view": {"mode": self.view_mode.get(), "azimuth_deg": self.view_az.get(), "elevation_deg": self.view_el.get()},
+            "view": {
+                "mode": self.view_mode.get(),
+                "azimuth_deg": self.view_az.get(),
+                "elevation_deg": self.view_el.get(),
+            },
             "horizon": {
                 "az_start": self.az_start.get(),
                 "az_end": self.az_end.get(),
                 "az_step": self.az_step.get(),
                 "max_range_m": self.max_range.get(),
-                "step_m": self.sample_step.get(),
+                "sample_step_m": self.sample_step.get(),
                 "debug_points": self.debug_points.get(),
             },
             "output": {
@@ -479,52 +557,97 @@ class UnifiedViewApp(tk.Tk):
                 "transparent": self.transparent.get(),
                 "generate_horizon_profile": self.gen_profile.get(),
             },
+            "batch": {
+                "enabled": self.batch_mode.get(),
+                "shapefile": self.batch_shapefile.get(),
+                "output_dir": self.batch_output_dir.get(),
+            },
             "turbines": self._collect_turbines(),
         }
-        with Path(p).open("w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+        Path(p).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
-    def generate(self):
-        self.log.delete("1.0", tk.END)
+    def _load_batch_points(self, dtm_path: Path) -> list[dict[str, float | str]]:
+        shp_path = Path(self.batch_shapefile.get().strip())
+        if not shp_path.exists():
+            raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
+
         try:
-            t0 = time.perf_counter()
-            geotiff = Path(self.geotiff_path.get().strip())
-            if not geotiff.exists():
-                raise FileNotFoundError("GeoTIFF non trovato")
+            import fiona
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("Modulo mancante 'fiona'. Installa dipendenze: pip install -r requirements.txt") from exc
 
-            turbines = self._collect_turbines()
-            ox = float(self.obs_x.get())
-            oy = float(self.obs_y.get())
-            eye_h = float(self.eye_h.get())
-            with DTM(geotiff) as dtm:
-                s = dtm.sample_nearest(ox, oy)
-                if s.value is None:
-                    raise ValueError("Observer fuori dal DTM o su nodata")
-                oz = float(s.value) + eye_h
+        with rasterio.open(str(dtm_path)) as ds:
+            dtm_crs = ds.crs
+        if dtm_crs is None:
+            raise ValueError("CRS GeoTIFF non definito")
 
-                for t in turbines:
-                    tx, ty = t["base_xyz"]
-                    ts = dtm.sample_nearest(tx, ty)
-                    if ts.value is None:
-                        raise ValueError(f"Turbina {t['id']} fuori dal DTM o su nodata")
-                    t["base_xyz"] = [tx, ty, float(ts.value)]
+        points: list[dict[str, float | str]] = []
+        with fiona.open(str(shp_path), "r") as src:
+            shp_crs = src.crs_wkt or src.crs
+            if shp_crs is None:
+                raise ValueError("CRS shapefile non definito")
+            shp_crs_norm = rasterio.crs.CRS.from_user_input(shp_crs)
+            if shp_crs_norm != dtm_crs:
+                raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
 
-                los_step = float(self.sample_step.get())
-                for t in turbines:
-                    tx, ty, bz = t["base_xyz"]
-                    d = float(np.hypot(tx - ox, ty - oy))
-                    if d <= 1e-6:
-                        t["visible_height_m"] = 0.0
-                        t["section_peak_elev_deg"] = float("-inf")
-                        t["tip_elev_deg"] = float("-inf")
-                        continue
+            for idx, feat in enumerate(src, start=1):
+                geom = feat.get("geometry") or {}
+                if geom.get("type") != "Point":
+                    self._append(f"Batch skip feature {idx}: geometria non Point ({geom.get('type')})")
+                    continue
+                coords = geom.get("coordinates")
+                if not coords or len(coords) < 2:
+                    self._append(f"Batch skip feature {idx}: coordinate non valide")
+                    continue
+                props = feat.get("properties") or {}
+                if "Nome" not in props:
+                    raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
+                points.append({"name": str(props.get("Nome") or ""), "x": float(coords[0]), "y": float(coords[1]), "index": idx})
+        if not points:
+            raise ValueError("Nessun punto valido nel shapefile")
+        return points
 
+    def _run_single_observer(self, ox: float, oy: float, base_output_png: Path, turbines_input: list[dict], az_start: float, az_end: float, force_view_az: float | None = None, force_view_el: float | None = None) -> tuple[Path, Path | None]:
+        geotiff = Path(self.geotiff_path.get().strip())
+        t0 = time.perf_counter()
+
+        with DTM(geotiff) as dtm:
+            obs_sample = dtm.sample_nearest(ox, oy)
+            if obs_sample.value is None:
+                raise RuntimeError("Observer fuori DTM o nodata")
+            oz = float(obs_sample.value) + float(self.eye_h.get())
+
+            turbines: list[dict] = []
+            for t in turbines_input:
+                tx, ty = float(t["base_xyz"][0]), float(t["base_xyz"][1])
+                smp = dtm.sample_nearest(tx, ty)
+                if smp.value is None:
+                    self._append(f"Skip {t['id']}: base fuori DTM/nodata")
+                    continue
+                turbines.append({
+                    "id": t["id"],
+                    "base_xyz": [tx, ty, float(smp.value)],
+                    "tower_height_m": float(t["tower_height_m"]),
+                    "rotor_diameter_m": float(t["rotor_diameter_m"]),
+                })
+
+            if not turbines:
+                raise RuntimeError("Nessuna turbina valida su DTM")
+
+            los_step = float(self.sample_step.get())
+            for t in turbines:
+                bx, by, bz = t["base_xyz"]
+                d = float(np.hypot(bx - ox, by - oy))
+                if d <= 1e-6:
+                    t["visible_height_m"] = float(t["tower_height_m"] + t["rotor_diameter_m"] * 0.5)
+                    t["section_peak_elev_deg"] = -90.0
+                    t["tip_elev_deg"] = 90.0
+                else:
                     sample_step = los_step if los_step > 0 else dtm.pixel_size
                     if sample_step <= 0:
                         sample_step = max(d, 1.0)
-
-                    ux = (tx - ox) / d
-                    uy = (ty - oy) / d
+                    ux = (bx - ox) / d
+                    uy = (by - oy) / d
                     peak_elev = -90.0
 
                     for sd in np.arange(sample_step, d, sample_step, dtype=float):
@@ -549,23 +672,27 @@ class UnifiedViewApp(tk.Tk):
                     t["section_peak_elev_deg"] = peak_elev
                     t["tip_elev_deg"] = tip_elev
 
-            az_plot, elev_horizon, _, stats = compute_horizon_profile(
-                dtm_path=geotiff,
-                observer_xy=(ox, oy),
-                observer_z=oz,
-                az_start=float(self.az_start.get()),
-                az_end=float(self.az_end.get()),
-                az_step=float(self.az_step.get()),
-                max_range=float(self.max_range.get()),
-                step_m=float(self.sample_step.get()),
-            )
+        az_plot, elev_horizon, _, stats = compute_horizon_profile(
+            dtm_path=geotiff,
+            observer_xy=(ox, oy),
+            observer_z=oz,
+            az_start=az_start,
+            az_end=az_end,
+            az_step=float(self.az_step.get()),
+            max_range=float(self.max_range.get()),
+            step_m=float(self.sample_step.get()),
+        )
 
-            hubs = np.array([
-                [t["base_xyz"][0], t["base_xyz"][1], t["base_xyz"][2] + t["tower_height_m"]] for t in turbines
-            ])
-            centroid = hubs.mean(axis=0)
-            auto_az = azimuth_deg(ox, oy, float(centroid[0]), float(centroid[1]))
-            auto_el = elevation_deg(oz, float(centroid[2]), float(np.hypot(centroid[0] - ox, centroid[1] - oy)))
+        hubs = np.array([[t["base_xyz"][0], t["base_xyz"][1], t["base_xyz"][2] + t["tower_height_m"]] for t in turbines])
+        centroid = hubs.mean(axis=0)
+        auto_az = azimuth_deg(ox, oy, float(centroid[0]), float(centroid[1]))
+        auto_el = elevation_deg(oz, float(centroid[2]), float(np.hypot(centroid[0] - ox, centroid[1] - oy)))
+
+        if force_view_az is not None:
+            view_az = force_view_az
+            self.view_az.set(f"{view_az:.3f}")
+            view_el = force_view_el if force_view_el is not None else 0.0
+        else:
             self.view_az.set(f"{auto_az:.3f}")
             if self.view_mode.get() == "auto":
                 view_az = auto_az
@@ -574,76 +701,148 @@ class UnifiedViewApp(tk.Tk):
                 view_az = float(self.view_az.get())
                 view_el = float(self.view_el.get())
 
-            intr = intrinsics_from_photo(
-                focal_mm=float(self.focal_mm.get()),
-                sensor_mm=(float(self.sensor_w.get()), float(self.sensor_h.get())),
-                width_px=int(self.out_w.get()),
-                height_px=int(self.out_h.get()),
-                fov_scale=float(self.fov_scale.get()),
-            )
+        intr = intrinsics_from_photo(
+            focal_mm=float(self.focal_mm.get()),
+            sensor_mm=(float(self.sensor_w.get()), float(self.sensor_h.get())),
+            width_px=int(self.out_w.get()),
+            height_px=int(self.out_h.get()),
+            fov_scale=float(self.fov_scale.get()),
+        )
 
-            forward = forward_from_az_el_deg(view_az, view_el)
-            pose = camera_pose_from_forward(np.array([ox, oy, oz], dtype=float), forward)
+        forward = forward_from_az_el_deg(view_az, view_el)
+        pose = camera_pose_from_forward(np.array([ox, oy, oz], dtype=float), forward)
 
-            out_png = Path(self.output_png.get().strip() or "camera_view.png")
-            cam_res = render_camera_view_png(
-                output_path=out_png,
-                intr=intr,
-                pose=pose,
+        cam_res = render_camera_view_png(
+            output_path=base_output_png,
+            intr=intr,
+            pose=pose,
+            az_plot=az_plot,
+            elev_horizon_deg=elev_horizon,
+            view_az_deg=view_az,
+            view_elev_deg=view_el,
+            turbines=turbines,
+            transparent=self.transparent.get(),
+        )
+
+        profile_path = None
+        if self.gen_profile.get():
+            profile_path = base_output_png.with_name(base_output_png.stem.replace("_camera_view", "") + "_horizon_profile.png")
+            try:
+                from core.render_profile import render_horizon_profile_png
+            except ModuleNotFoundError as exc:
+                missing = exc.name or "dependency"
+                raise RuntimeError(
+                    f"Impossibile generare horizon_profile: modulo mancante '{missing}'. "
+                    "Installa le dipendenze con: pip install -r requirements.txt"
+                ) from exc
+
+            render_horizon_profile_png(
+                output_path=profile_path,
                 az_plot=az_plot,
-                elev_horizon_deg=elev_horizon,
+                elev_horizon=elev_horizon,
+                observer_xyz=(ox, oy, oz),
+                turbines=turbines,
+                focal_mm=float(self.focal_mm.get()),
+                sensor_w_mm=float(self.sensor_w.get()),
+                sensor_h_mm=float(self.sensor_h.get()),
                 view_az_deg=view_az,
                 view_elev_deg=view_el,
-                turbines=turbines,
                 transparent=self.transparent.get(),
             )
 
-            if self.gen_profile.get():
-                profile_path = out_png.with_name("horizon_profile.png")
-                render_horizon_profile_png(
-                    output_path=profile_path,
-                    az_plot=az_plot,
-                    elev_horizon=elev_horizon,
-                    observer_xyz=(ox, oy, oz),
-                    turbines=turbines,
-                    focal_mm=float(self.focal_mm.get()),
-                    sensor_w_mm=float(self.sensor_w.get()),
-                    sensor_h_mm=float(self.sensor_h.get()),
-                    view_az_deg=view_az,
-                    view_elev_deg=view_el,
-                    transparent=self.transparent.get(),
-                )
-                self._append(f"horizon_profile: {profile_path}")
+        self._append(f"camera_view: {base_output_png}")
+        if profile_path is not None:
+            self._append(f"horizon_profile: {profile_path}")
+        self._append(f"Nodata samples: {stats['nodata_samples']}")
+        self._append(f"Turbine in FOV/frame: {', '.join(cam_res.inside_ids) if cam_res.inside_ids else 'none'}")
+        self._append(f"Turbine fuori FOV/frame: {', '.join(cam_res.outside_ids) if cam_res.outside_ids else 'none'}")
 
-            self._append(f"camera_view: {out_png}")
-            self._append(f"Nodata samples: {stats['nodata_samples']}")
-            self._append(f"Turbine in FOV/frame: {', '.join(cam_res.inside_ids) if cam_res.inside_ids else 'none'}")
-            self._append(f"Turbine fuori FOV/frame: {', '.join(cam_res.outside_ids) if cam_res.outside_ids else 'none'}")
-            for t in turbines:
-                tid = t["id"]
-                bx, by, bz = t["base_xyz"]
-                d = max(float(np.hypot(bx - ox, by - oy)), 1e-6)
-                az = azimuth_deg(ox, oy, bx, by)
-                e_base = elevation_deg(oz, bz, d)
-                e_hub = elevation_deg(oz, bz + t["tower_height_m"], d)
-                e_tip = elevation_deg(oz, bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5, d)
-                e_hor = interpolate_horizon_elevation(az_plot, elev_horizon, az)
-                peak_elev = float(t.get("section_peak_elev_deg", float("nan")))
-                peak_quota = oz + math.tan(math.radians(peak_elev)) * d if math.isfinite(peak_elev) and peak_elev > -89.999 else float("nan")
-                tip_quota = bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5
-                self._append(
-                    f"{tid}: az={az:.2f} elev_base={e_base:.2f}° elev_hub={e_hub:.2f}° elev_tip={e_tip:.2f}° elev_horizon={e_hor:.2f}°"
-                )
-                self._append(
-                    f"{tid}: elev_picco_sezione={peak_elev:.2f}° elev_tip={t.get('tip_elev_deg', float('nan')):.2f}° altezza_visibile={t.get('visible_height_m', 0.0):.2f} m"
-                )
-                self._append(
-                    f"{tid}: quota_osservatore={oz:.2f} m quota_base={bz:.2f} m quota_tip={tip_quota:.2f} m quota_picco_sezione={peak_quota:.2f} m"
-                )
+        for t in turbines:
+            tid = t["id"]
+            bx, by, bz = t["base_xyz"]
+            d = max(float(np.hypot(bx - ox, by - oy)), 1e-6)
+            az = azimuth_deg(ox, oy, bx, by)
+            e_base = elevation_deg(oz, bz, d)
+            e_hub = elevation_deg(oz, bz + t["tower_height_m"], d)
+            e_tip = elevation_deg(oz, bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5, d)
+            e_hor = interpolate_horizon_elevation(az_plot, elev_horizon, az)
+            peak_elev = float(t.get("section_peak_elev_deg", float("nan")))
+            peak_quota = oz + math.tan(math.radians(peak_elev)) * d if math.isfinite(peak_elev) and peak_elev > -89.999 else float("nan")
+            tip_quota = bz + t["tower_height_m"] + t["rotor_diameter_m"] * 0.5
+            self._append(f"{tid}: az={az:.2f} elev_base={e_base:.2f}° elev_hub={e_hub:.2f}° elev_tip={e_tip:.2f}° elev_horizon={e_hor:.2f}°")
+            self._append(
+                f"{tid}: elev_picco_sezione={peak_elev:.2f}° elev_tip={t.get('tip_elev_deg', float('nan')):.2f}° altezza_visibile={t.get('visible_height_m', 0.0):.2f} m"
+            )
+            self._append(f"{tid}: quota_osservatore={oz:.2f} m quota_base={bz:.2f} m quota_tip={tip_quota:.2f} m quota_picco_sezione={peak_quota:.2f} m")
 
-            dt = time.perf_counter() - t0
-            self._append(f"Tempo totale: {dt:.2f}s")
-            messagebox.showinfo("Completato", f"Vista generata: {out_png}")
+        dt = time.perf_counter() - t0
+        self._append(f"Tempo totale: {dt:.2f}s")
+        return base_output_png, profile_path
+
+    def generate(self):
+        try:
+            turbines = self._collect_turbines()
+            geotiff = Path(self.geotiff_path.get().strip())
+            if not geotiff.exists():
+                raise FileNotFoundError("GeoTIFF non trovato")
+
+            if self.batch_mode.get():
+                out_dir = Path(self.batch_output_dir.get().strip())
+                if not out_dir:
+                    raise ValueError("Selezionare cartella output batch")
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+                points = self._load_batch_points(geotiff)
+                self.progress.configure(maximum=len(points), value=0)
+                self._append(f"Batch start: {len(points)} punti")
+
+                ok_count = 0
+                for i, point in enumerate(points, start=1):
+                    name = self._sanitize_name(str(point["name"]), int(point["index"]))
+                    ox = float(point["x"])
+                    oy = float(point["y"])
+                    az_center, az_start, az_end = self._compute_batch_azimuth_range(ox, oy, turbines)
+                    self._append(
+                        f"[{i}/{len(points)}] Nome={name} XY=({ox:.3f},{oy:.3f}) az_center={az_center:.3f} az_start={az_start:.3f} az_end={az_end:.3f}"
+                    )
+
+                    camera_path = out_dir / f"{name}_camera_view.png"
+                    try:
+                        force_el = float(self.view_el.get()) if self.view_mode.get() == "manual" else 0.0
+                        self._run_single_observer(
+                            ox=ox,
+                            oy=oy,
+                            base_output_png=camera_path,
+                            turbines_input=turbines,
+                            az_start=az_start,
+                            az_end=az_end,
+                            force_view_az=az_center,
+                            force_view_el=force_el,
+                        )
+                        ok_count += 1
+                        self._append(f"[{i}/{len(points)}] ESITO=OK")
+                    except Exception as exc:
+                        self._append(f"[{i}/{len(points)}] ESITO=ERRORE: {exc}")
+
+                    self.progress.configure(value=i)
+                    self.update_idletasks()
+
+                messagebox.showinfo("Completato", f"Batch completato: {ok_count}/{len(points)} OK")
+            else:
+                ox = float(self.obs_x.get())
+                oy = float(self.obs_y.get())
+                self.progress.configure(maximum=1, value=0)
+                out_png = Path(self.output_png.get().strip() or "camera_view.png")
+                self._run_single_observer(
+                    ox=ox,
+                    oy=oy,
+                    base_output_png=out_png,
+                    turbines_input=turbines,
+                    az_start=float(self.az_start.get()),
+                    az_end=float(self.az_end.get()),
+                )
+                self.progress.configure(value=1)
+                messagebox.showinfo("Completato", f"Vista generata: {out_png}")
         except Exception as e:
             self._append(f"Errore: {e}")
             messagebox.showerror("Errore", str(e))
