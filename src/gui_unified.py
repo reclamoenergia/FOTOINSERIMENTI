@@ -750,6 +750,7 @@ class UnifiedViewApp(tk.Tk):
                 transparent=self.transparent.get(),
             )
 
+
         self._append(f"camera_view: {base_output_png}")
         if profile_path is not None:
             self._append(f"horizon_profile: {profile_path}")
@@ -774,6 +775,7 @@ class UnifiedViewApp(tk.Tk):
                 f"{tid}: elev_picco_sezione={peak_elev:.2f}° elev_tip={t.get('tip_elev_deg', float('nan')):.2f}° altezza_visibile={t.get('visible_height_m', 0.0):.2f} m"
             )
             self._append(f"{tid}: quota_osservatore={oz:.2f} m quota_base={bz:.2f} m quota_tip={tip_quota:.2f} m quota_picco_sezione={peak_quota:.2f} m")
+
 
         dt = time.perf_counter() - t0
         self._append(f"Tempo totale: {dt:.2f}s")
