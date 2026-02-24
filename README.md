@@ -117,8 +117,7 @@ Esempio testuale nel repo: `examples/observer_points.geojson` (3 punti, campo `N
 Genera lo shapefile locale con `python examples/create_observer_shapefile.py`.
 
 Dipendenze aggiuntive per batch:
-- `fiona`
-- `shapely`
+- `pyshp`
 
 Avvio
 python src/gui_unified.py
@@ -140,9 +139,9 @@ pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hook
 Build Unified (gui_unified.py)
 build_scripts\build_unified_windows.bat
 
-Lo script usa PyInstaller con hook dedicati per rasterio/fiona e include esplicitamente i moduli Fiona usati dalla modalità batch shapefile:
+Lo script usa PyInstaller con hook dedicato per rasterio:
 
-python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import fiona --collect-submodules rasterio --collect-data rasterio --collect-all fiona
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
 Troubleshooting packaging
 Se all'avvio dell'exe compare errore simile a:
 
@@ -150,8 +149,3 @@ ModuleNotFoundError: No module named 'rasterio.sample'
 ricostruire l'exe nello stesso ambiente Python in cui rasterio è installato, usando i flag/hook sopra.
 Se il problema persiste, cancellare build/ e dist/ prima di ricompilare.
 
-Se in `WTGUnifiedView.exe` compare errore simile a:
-
-ModuleNotFoundError: No module named 'fiona'
-
-ricompilare usando `build_scripts\build_unified_windows.bat` (o includere i flag `--hidden-import fiona --collect-all fiona`).

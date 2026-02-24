@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 import rasterio
+import shapefile
 
 from core.camera_model import camera_pose_from_forward, forward_from_az_el_deg, intrinsics_from_photo
 from core.dtm import DTM
@@ -571,38 +572,35 @@ class UnifiedViewApp(tk.Tk):
         if not shp_path.exists():
             raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
 
-        try:
-            import fiona
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("Modulo mancante 'fiona'. Installa dipendenze: pip install -r requirements.txt") from exc
-
         with rasterio.open(str(dtm_path)) as ds:
             dtm_crs = ds.crs
         if dtm_crs is None:
             raise ValueError("CRS GeoTIFF non definito")
 
-        points: list[dict[str, float | str]] = []
-        with fiona.open(str(shp_path), "r") as src:
-            shp_crs = src.crs_wkt or src.crs
-            if shp_crs is None:
-                raise ValueError("CRS shapefile non definito")
-            shp_crs_norm = rasterio.crs.CRS.from_user_input(shp_crs)
-            if shp_crs_norm != dtm_crs:
-                raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
+        prj_path = shp_path.with_suffix(".prj")
+        if not prj_path.exists():
+            raise ValueError(f"File .prj non trovato per lo shapefile: {prj_path}")
+        shp_crs_norm = rasterio.crs.CRS.from_wkt(prj_path.read_text(encoding="utf-8"))
+        if shp_crs_norm != dtm_crs:
+            raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
 
-            for idx, feat in enumerate(src, start=1):
-                geom = feat.get("geometry") or {}
-                if geom.get("type") != "Point":
-                    self._append(f"Batch skip feature {idx}: geometria non Point ({geom.get('type')})")
-                    continue
-                coords = geom.get("coordinates")
-                if not coords or len(coords) < 2:
+        points: list[dict[str, float | str]] = []
+        with shapefile.Reader(str(shp_path), encoding="utf-8") as src:
+            fields = [f[0] for f in src.fields if f[0] != "DeletionFlag"]
+            if "Nome" not in fields:
+                raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
+
+            shape_type_name = shapefile.SHAPETYPE_LOOKUP.get(src.shapeType, str(src.shapeType))
+            if src.shapeType not in (shapefile.POINT, shapefile.POINTZ, shapefile.POINTM):
+                raise ValueError(f"Geometria shapefile non supportata: {shape_type_name} (atteso Point)")
+
+            for idx, rec in enumerate(src.iterShapeRecords(), start=1):
+                coords = rec.shape.points[0] if rec.shape.points else None
+                if coords is None or len(coords) < 2:
                     self._append(f"Batch skip feature {idx}: coordinate non valide")
                     continue
-                props = feat.get("properties") or {}
-                if "Nome" not in props:
-                    raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
-                points.append({"name": str(props.get("Nome") or ""), "x": float(coords[0]), "y": float(coords[1]), "index": idx})
+                nome = rec.record.as_dict().get("Nome")
+                points.append({"name": str(nome or ""), "x": float(coords[0]), "y": float(coords[1]), "index": idx})
         if not points:
             raise ValueError("Nessun punto valido nel shapefile")
         return points
