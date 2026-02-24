@@ -1,0 +1,25 @@
+{
+  "type": "FeatureCollection",
+  "name": "observer_points",
+  "crs": {
+    "type": "name",
+    "properties": {"name": "EPSG:32632"}
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"Nome": "OSS Nord"},
+      "geometry": {"type": "Point", "coordinates": [281900.0, 4832400.0]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"Nome": "OSS Centro"},
+      "geometry": {"type": "Point", "coordinates": [282100.0, 4832500.0]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"Nome": "OSS Sud"},
+      "geometry": {"type": "Point", "coordinates": [281800.0, 4832600.0]}
+    }
+  ]
+}
