@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import math
 from pathlib import Path
 import re
@@ -10,7 +11,6 @@ from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 import rasterio
-import shapefile
 
 from core.camera_model import camera_pose_from_forward, forward_from_az_el_deg, intrinsics_from_photo
 from core.dtm import DTM
@@ -568,6 +568,7 @@ class UnifiedViewApp(tk.Tk):
         Path(p).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
     def _load_batch_points(self, dtm_path: Path) -> list[dict[str, float | str]]:
+        shapefile = self._get_shapefile_module()
         shp_path = Path(self.batch_shapefile.get().strip())
         if not shp_path.exists():
             raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
@@ -604,6 +605,15 @@ class UnifiedViewApp(tk.Tk):
         if not points:
             raise ValueError("Nessun punto valido nel shapefile")
         return points
+
+    def _get_shapefile_module(self):
+        try:
+            return importlib.import_module("shapefile")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Dipendenza mancante: modulo 'shapefile' (pacchetto pyshp). "
+                "Installa/ricompila con pyshp disponibile."
+            ) from exc
 
     def _run_single_observer(self, ox: float, oy: float, base_output_png: Path, turbines_input: list[dict], az_start: float, az_end: float, force_view_az: float | None = None, force_view_el: float | None = None) -> tuple[Path, Path | None]:
         geotiff = Path(self.geotiff_path.get().strip())

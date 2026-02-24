@@ -135,13 +135,13 @@ Build Overlay (gui.py)
 build_scripts\build_windows.bat
 Lo script usa PyInstaller con hook dedicato (build_scripts/hooks/hook-rasterio.py) e flag espliciti per rasterio:
 
-pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
+pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import shapefile --collect-submodules rasterio --collect-data rasterio
 Build Unified (gui_unified.py)
 build_scripts\build_unified_windows.bat
 
 Lo script usa PyInstaller con hook dedicato per rasterio:
 
-python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import shapefile --collect-submodules rasterio --collect-data rasterio
 Troubleshooting packaging
 Se all'avvio dell'exe compare errore simile a:
 
