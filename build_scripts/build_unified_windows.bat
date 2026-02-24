@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 REM =========================================================
 REM Build Windows EXE (WTGUnifiedView) - no console
-REM Includes Fiona dependencies used by batch shapefile mode
+REM Includes rasterio dependencies used by batch shapefile mode
 REM =========================================================
 
 REM Move to repository root (script is in build_scripts\)
@@ -47,14 +47,12 @@ python -m PyInstaller ^
   "%APP_ENTRY%" ^
   --additional-hooks-dir "%HOOK_DIR%" ^
   --hidden-import rasterio.sample ^
-  --hidden-import fiona ^
   --collect-submodules rasterio ^
-  --collect-data rasterio ^
-  --collect-all fiona
+  --collect-data rasterio
 
 if errorlevel 1 (
   echo [ERROR] Build failed.
-  echo [HINT] Use the same virtualenv where rasterio/fiona are installed.
+  echo [HINT] Use the same virtualenv where rasterio is installed.
   popd
   exit /b 1
 )
