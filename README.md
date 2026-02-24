@@ -117,8 +117,7 @@ Esempio testuale nel repo: `examples/observer_points.geojson` (3 punti, campo `N
 Genera lo shapefile locale con `python examples/create_observer_shapefile.py`.
 
 Dipendenze aggiuntive per batch:
-- `fiona`
-- `shapely`
+- `pyshp`
 
 Avvio
 python src/gui_unified.py
@@ -130,6 +129,22 @@ Quota osservatore calcolata da DTM: Z = DTM(X,Y) + eye_height.
 Quota base di ogni WTG calcolata da DTM in (X,Y).
 
 Descrizione algoritmo in docs/wtg_unified_algorithm.md.
+
+
+Applicazione automatica senza conflitti (consigliata)
+Per evitare qualsiasi merge conflict manuale quando devi riallineare tutte le modifiche batch-shapefile, usa gli script in `build_scripts/`:
+
+Windows:
+```bat
+build_scripts\auto_sync_batch_branch.bat auto/batch-shapefile HEAD
+```
+
+Linux/macOS:
+```bash
+./build_scripts/auto_sync_batch_branch.sh auto/batch-shapefile HEAD
+```
+
+Gli script creano un branch nuovo dalla base `eebc76f` e applicano un merge `--ff-only` dal ref sorgente: se il fast-forward è possibile non ci sono conflitti da risolvere.
 
 Build Windows (.exe)
 Build Overlay (gui.py)

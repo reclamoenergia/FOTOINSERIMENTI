@@ -572,37 +572,40 @@ class UnifiedViewApp(tk.Tk):
             raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
 
         try:
-            import fiona
+            import shapefile
         except ModuleNotFoundError as exc:
-            raise RuntimeError("Modulo mancante 'fiona'. Installa dipendenze: pip install -r requirements.txt") from exc
+            raise RuntimeError("Modulo mancante 'pyshp'. Installa dipendenze: pip install -r requirements.txt") from exc
 
         with rasterio.open(str(dtm_path)) as ds:
             dtm_crs = ds.crs
         if dtm_crs is None:
             raise ValueError("CRS GeoTIFF non definito")
 
-        points: list[dict[str, float | str]] = []
-        with fiona.open(str(shp_path), "r") as src:
-            shp_crs = src.crs_wkt or src.crs
-            if shp_crs is None:
-                raise ValueError("CRS shapefile non definito")
-            shp_crs_norm = rasterio.crs.CRS.from_user_input(shp_crs)
-            if shp_crs_norm != dtm_crs:
-                raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
+        prj_path = shp_path.with_suffix('.prj')
+        if not prj_path.exists():
+            raise ValueError(f"File .prj mancante per lo shapefile: {prj_path}")
+        shp_crs_norm = rasterio.crs.CRS.from_wkt(prj_path.read_text(encoding='utf-8', errors='ignore'))
+        if shp_crs_norm != dtm_crs:
+            raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
 
-            for idx, feat in enumerate(src, start=1):
-                geom = feat.get("geometry") or {}
-                if geom.get("type") != "Point":
-                    self._append(f"Batch skip feature {idx}: geometria non Point ({geom.get('type')})")
-                    continue
-                coords = geom.get("coordinates")
-                if not coords or len(coords) < 2:
-                    self._append(f"Batch skip feature {idx}: coordinate non valide")
-                    continue
-                props = feat.get("properties") or {}
-                if "Nome" not in props:
-                    raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
-                points.append({"name": str(props.get("Nome") or ""), "x": float(coords[0]), "y": float(coords[1]), "index": idx})
+        reader = shapefile.Reader(str(shp_path))
+        field_names = [f[0] for f in reader.fields if f[0] != 'DeletionFlag']
+        if 'Nome' not in field_names:
+            raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
+
+        points: list[dict[str, float | str]] = []
+        for idx, shape_rec in enumerate(reader.iterShapeRecords(), start=1):
+            shp = shape_rec.shape
+            if shp.shapeType != shapefile.POINT:
+                self._append(f"Batch skip feature {idx}: geometria non Point ({shp.shapeType})")
+                continue
+            if not shp.points:
+                self._append(f"Batch skip feature {idx}: coordinate non valide")
+                continue
+            x, y = shp.points[0]
+            rec = shape_rec.record.as_dict()
+            points.append({"name": str(rec.get("Nome") or ""), "x": float(x), "y": float(y), "index": idx})
+
         if not points:
             raise ValueError("Nessun punto valido nel shapefile")
         return points
@@ -750,7 +753,6 @@ class UnifiedViewApp(tk.Tk):
                 transparent=self.transparent.get(),
             )
 
-
         self._append(f"camera_view: {base_output_png}")
         if profile_path is not None:
             self._append(f"horizon_profile: {profile_path}")
@@ -775,7 +777,6 @@ class UnifiedViewApp(tk.Tk):
                 f"{tid}: elev_picco_sezione={peak_elev:.2f}° elev_tip={t.get('tip_elev_deg', float('nan')):.2f}° altezza_visibile={t.get('visible_height_m', 0.0):.2f} m"
             )
             self._append(f"{tid}: quota_osservatore={oz:.2f} m quota_base={bz:.2f} m quota_tip={tip_quota:.2f} m quota_picco_sezione={peak_quota:.2f} m")
-
 
         dt = time.perf_counter() - t0
         self._append(f"Tempo totale: {dt:.2f}s")
