@@ -3,10 +3,9 @@ setlocal EnableExtensions
 
 REM =========================================================
 REM Build Windows EXE (WTGUnifiedView) - no console
-REM Includes Fiona dependencies used by batch shapefile mode
+REM Fiona is optional: if import fails, build continues with pyshp fallback
 REM =========================================================
 
-REM Move to repository root (script is in build_scripts\)
 pushd "%~dp0\.." || (
   echo [ERROR] Cannot move to repository root.
   exit /b 1
@@ -39,6 +38,15 @@ echo [INFO] Cleaning previous build artifacts...
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
+set "PYI_FIONA_FLAGS="
+python -c "import fiona" >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] Fiona not importable in this environment. Building without Fiona bundle; pyshp fallback will be used at runtime.
+) else (
+  set "PYI_FIONA_FLAGS=--hidden-import fiona --collect-all fiona"
+  echo [INFO] Fiona detected: enabling Fiona bundle flags.
+)
+
 echo [INFO] Running PyInstaller...
 python -m PyInstaller ^
   --noconsole ^
@@ -47,14 +55,14 @@ python -m PyInstaller ^
   "%APP_ENTRY%" ^
   --additional-hooks-dir "%HOOK_DIR%" ^
   --hidden-import rasterio.sample ^
-  --hidden-import fiona ^
+  --hidden-import shapefile ^
   --collect-submodules rasterio ^
   --collect-data rasterio ^
-  --collect-all fiona
+  %PYI_FIONA_FLAGS%
 
 if errorlevel 1 (
   echo [ERROR] Build failed.
-  echo [HINT] Use the same virtualenv where rasterio/fiona are installed.
+  echo [HINT] Use the same virtualenv where rasterio is installed.
   popd
   exit /b 1
 )

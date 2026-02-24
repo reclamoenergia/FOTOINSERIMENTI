@@ -566,29 +566,22 @@ class UnifiedViewApp(tk.Tk):
         }
         Path(p).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
-    def _load_batch_points(self, dtm_path: Path) -> list[dict[str, float | str]]:
-        shp_path = Path(self.batch_shapefile.get().strip())
-        if not shp_path.exists():
-            raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
-
+    @staticmethod
+    def _normalize_crs(crs_value) -> rasterio.crs.CRS:
         try:
-            import fiona
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("Modulo mancante 'fiona'. Installa dipendenze: pip install -r requirements.txt") from exc
+            return rasterio.crs.CRS.from_user_input(crs_value)
+        except Exception as exc:
+            raise ValueError(f"CRS shapefile non valido: {crs_value}") from exc
 
-        with rasterio.open(str(dtm_path)) as ds:
-            dtm_crs = ds.crs
-        if dtm_crs is None:
-            raise ValueError("CRS GeoTIFF non definito")
+    def _load_batch_points_with_fiona(self, shp_path: Path) -> tuple[list[dict[str, float | str]], rasterio.crs.CRS]:
+        import fiona
 
         points: list[dict[str, float | str]] = []
         with fiona.open(str(shp_path), "r") as src:
             shp_crs = src.crs_wkt or src.crs
             if shp_crs is None:
                 raise ValueError("CRS shapefile non definito")
-            shp_crs_norm = rasterio.crs.CRS.from_user_input(shp_crs)
-            if shp_crs_norm != dtm_crs:
-                raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
+            shp_crs_norm = self._normalize_crs(shp_crs)
 
             for idx, feat in enumerate(src, start=1):
                 geom = feat.get("geometry") or {}
@@ -603,6 +596,65 @@ class UnifiedViewApp(tk.Tk):
                 if "Nome" not in props:
                     raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
                 points.append({"name": str(props.get("Nome") or ""), "x": float(coords[0]), "y": float(coords[1]), "index": idx})
+
+        return points, shp_crs_norm
+
+    def _load_batch_points_with_pyshp(self, shp_path: Path) -> tuple[list[dict[str, float | str]], rasterio.crs.CRS]:
+        try:
+            import shapefile
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Modulo mancante 'fiona' e fallback 'pyshp' non disponibile. Installa dipendenze: pip install -r requirements.txt"
+            ) from exc
+
+        prj_path = shp_path.with_suffix(".prj")
+        if not prj_path.exists():
+            raise ValueError("CRS shapefile non definito: file .prj non trovato")
+        prj_text = prj_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not prj_text:
+            raise ValueError("CRS shapefile non definito: file .prj vuoto")
+        shp_crs_norm = self._normalize_crs(prj_text)
+
+        points: list[dict[str, float | str]] = []
+        with shapefile.Reader(str(shp_path)) as reader:
+            fields = [field[0] for field in reader.fields[1:]]
+            if "Nome" not in fields:
+                raise ValueError("Campo attributo obbligatorio 'Nome' non trovato nello shapefile")
+
+            for idx, rec in enumerate(reader.iterShapeRecords(), start=1):
+                shape = rec.shape
+                shape_type = (shape.shapeTypeName or "").upper()
+                if not shape_type.startswith("POINT"):
+                    self._append(f"Batch skip feature {idx}: geometria non Point ({shape.shapeTypeName})")
+                    continue
+                if not shape.points:
+                    self._append(f"Batch skip feature {idx}: coordinate non valide")
+                    continue
+                x, y = shape.points[0][0], shape.points[0][1]
+                attrs = rec.record.as_dict()
+                points.append({"name": str(attrs.get("Nome") or ""), "x": float(x), "y": float(y), "index": idx})
+
+        return points, shp_crs_norm
+
+    def _load_batch_points(self, dtm_path: Path) -> list[dict[str, float | str]]:
+        shp_path = Path(self.batch_shapefile.get().strip())
+        if not shp_path.exists():
+            raise FileNotFoundError(f"Shapefile non trovato: {shp_path}")
+
+        with rasterio.open(str(dtm_path)) as ds:
+            dtm_crs = ds.crs
+        if dtm_crs is None:
+            raise ValueError("CRS GeoTIFF non definito")
+
+        try:
+            points, shp_crs_norm = self._load_batch_points_with_fiona(shp_path)
+        except Exception as exc:
+            self._append(f"[INFO] Fiona non disponibile/non funzionante ({exc.__class__.__name__}): uso fallback pyshp (.shp/.dbf/.prj)")
+            points, shp_crs_norm = self._load_batch_points_with_pyshp(shp_path)
+
+        if shp_crs_norm != dtm_crs:
+            raise ValueError(f"CRS mismatch: shapefile={shp_crs_norm} geotiff={dtm_crs}")
+
         if not points:
             raise ValueError("Nessun punto valido nel shapefile")
         return points
