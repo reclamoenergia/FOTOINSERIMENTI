@@ -47,6 +47,7 @@ python -m PyInstaller ^
   "%APP_ENTRY%" ^
   --additional-hooks-dir "%HOOK_DIR%" ^
   --hidden-import rasterio.sample ^
+  --hidden-import shapefile ^
   --collect-submodules rasterio ^
   --collect-data rasterio
 
