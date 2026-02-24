@@ -117,8 +117,13 @@ Esempio testuale nel repo: `examples/observer_points.geojson` (3 punti, campo `N
 Genera lo shapefile locale con `python examples/create_observer_shapefile.py`.
 
 Dipendenze aggiuntive per batch:
-- `fiona`
 - `shapely`
+- `pyshp` (fallback shapefile)
+- `fiona` (opzionale, consigliato se disponibile)
+
+Installazione consigliata:
+- base (senza Fiona): `pip install -r requirements.txt`
+- con Fiona (se il tuo Python/OS ha wheel compatibile): `pip install -r requirements-fiona.txt`
 
 Avvio
 python src/gui_unified.py
@@ -140,9 +145,13 @@ pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hook
 Build Unified (gui_unified.py)
 build_scripts\build_unified_windows.bat
 
-Lo script usa PyInstaller con hook dedicati per rasterio/fiona e include esplicitamente i moduli Fiona usati dalla modalità batch shapefile:
+Lo script usa PyInstaller con hook rasterio e include sempre il fallback shapefile (`pyshp`). Se `fiona` è importabile nell'ambiente di build, aggiunge automaticamente anche i flag Fiona.
 
-python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import fiona --hidden-import shapefile --collect-submodules rasterio --collect-data rasterio --collect-all fiona
+Comando base (fallback pyshp):
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import shapefile --collect-submodules rasterio --collect-data rasterio
+
+Comando con Fiona (opzionale):
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import shapefile --hidden-import fiona --collect-submodules rasterio --collect-data rasterio --collect-all fiona
 Troubleshooting packaging
 Se all'avvio dell'exe compare errore simile a:
 

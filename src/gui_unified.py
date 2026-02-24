@@ -648,8 +648,8 @@ class UnifiedViewApp(tk.Tk):
 
         try:
             points, shp_crs_norm = self._load_batch_points_with_fiona(shp_path)
-        except ModuleNotFoundError:
-            self._append("[INFO] Fiona non disponibile nel runtime: uso fallback pyshp (.shp/.dbf/.prj)")
+        except Exception as exc:
+            self._append(f"[INFO] Fiona non disponibile/non funzionante ({exc.__class__.__name__}): uso fallback pyshp (.shp/.dbf/.prj)")
             points, shp_crs_norm = self._load_batch_points_with_pyshp(shp_path)
 
         if shp_crs_norm != dtm_crs:
