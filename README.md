@@ -138,11 +138,22 @@ Lo script usa PyInstaller con hook dedicato (build_scripts/hooks/hook-rasterio.p
 
 pyinstaller --noconsole --onefile --name WTGOverlay src/gui.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
 Build Unified (gui_unified.py)
-python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --collect-submodules rasterio --collect-data rasterio
+build_scripts\build_unified_windows.bat
+
+Lo script usa PyInstaller con hook dedicati per rasterio/fiona e include esplicitamente i moduli Fiona usati dalla modalità batch shapefile:
+
+python -m PyInstaller --noconsole --onefile --name WTGUnifiedView src\gui_unified.py --additional-hooks-dir build_scripts/hooks --hidden-import rasterio.sample --hidden-import fiona --hidden-import shapefile --collect-submodules rasterio --collect-data rasterio --collect-all fiona
 Troubleshooting packaging
 Se all'avvio dell'exe compare errore simile a:
 
 ModuleNotFoundError: No module named 'rasterio.sample'
 ricostruire l'exe nello stesso ambiente Python in cui rasterio è installato, usando i flag/hook sopra.
 Se il problema persiste, cancellare build/ e dist/ prima di ricompilare.
+
+Se in `WTGUnifiedView.exe` compare errore simile a:
+
+ModuleNotFoundError: No module named 'fiona'
+
+ricompilare usando `build_scripts\build_unified_windows.bat` (o includere i flag `--hidden-import fiona --collect-all fiona`).
+Se `fiona` non fosse disponibile nel runtime, la modalità batch usa automaticamente un fallback `pyshp` (richiede i file `.shp/.dbf/.prj`).
 
