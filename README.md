@@ -99,6 +99,26 @@ range.step_m = 0 usa automaticamente il pixel size del DTM.
 Tool 3: Unified Camera View
 GUI principale in src/gui_unified.py per generare camera_view.png (skyline + turbine in prospettiva) e opzionalmente horizon_profile.png.
 
+
+Batch shapefile punti osservatore
+Modalità opzionale in `src/gui_unified.py`:
+
+- Attivare checkbox **Batch shapefile**
+- Selezionare shapefile `.shp` di punti (campo attributo obbligatorio `Nome`)
+- Selezionare cartella output batch
+
+Per ogni punto vengono generati:
+- `<Nome>_camera_view.png`
+- `<Nome>_horizon_profile.png` (se abilitato)
+
+Nel batch l'intervallo azimutale è calcolato automaticamente per ogni osservatore con finestra 180° centrata sull'azimut medio circolare delle turbine (`az_start = center-90`, `az_end = center+90`).
+
+Esempio testuale nel repo: `examples/observer_points.geojson` (3 punti, campo `Nome`).
+Genera lo shapefile locale con `python examples/create_observer_shapefile.py`.
+
+Dipendenze aggiuntive per batch:
+- `pyshp`
+
 Avvio
 python src/gui_unified.py
 Note operative
