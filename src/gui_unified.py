@@ -620,14 +620,19 @@ class UnifiedViewApp(tk.Tk):
     def _run_single_observer(self, ox: float, oy: float, base_output_png: Path, turbines_input: list[dict], az_start: float, az_end: float, force_view_az: float | None = None, force_view_el: float | None = None) -> tuple[Path, Path | None]:
         geotiff = Path(self.geotiff_path.get().strip())
         t0 = time.perf_counter()
+        self._append(f"[DEBUG] _run_single_observer START output={base_output_png} az_range=({az_start:.3f},{az_end:.3f})")
+        self._append(f"[DEBUG] Apertura DTM: {geotiff}")
 
         with DTM(geotiff) as dtm:
+            self._append("[DEBUG] DTM aperto, campionamento quota osservatore")
             obs_sample = dtm.sample_nearest(ox, oy)
             if obs_sample.value is None:
                 raise RuntimeError("Observer fuori DTM o nodata")
             oz = float(obs_sample.value) + float(self.eye_h.get())
+            self._append(f"[DEBUG] Quota osservatore: terreno={float(obs_sample.value):.3f}m eye_h={float(self.eye_h.get()):.3f}m totale={oz:.3f}m")
 
             turbines: list[dict] = []
+            self._append(f"[DEBUG] Validazione turbine su DTM: {len(turbines_input)} elementi")
             for t in turbines_input:
                 tx, ty = float(t["base_xyz"][0]), float(t["base_xyz"][1])
                 smp = dtm.sample_nearest(tx, ty)
@@ -640,12 +645,15 @@ class UnifiedViewApp(tk.Tk):
                     "tower_height_m": float(t["tower_height_m"]),
                     "rotor_diameter_m": float(t["rotor_diameter_m"]),
                 })
+            self._append(f"[DEBUG] Turbine valide su DTM: {len(turbines)}")
 
             if not turbines:
                 raise RuntimeError("Nessuna turbina valida su DTM")
 
             los_step = float(self.sample_step.get())
-            for t in turbines:
+            self._append(f"[DEBUG] Inizio analisi LOS turbine (step={los_step:.3f}m)")
+            for idx, t in enumerate(turbines, start=1):
+                self._append(f"[DEBUG] LOS turbina {idx}/{len(turbines)} id={t['id']}")
                 bx, by, bz = t["base_xyz"]
                 d = float(np.hypot(bx - ox, by - oy))
                 if d <= 1e-6:
@@ -681,7 +689,9 @@ class UnifiedViewApp(tk.Tk):
                     t["visible_height_m"] = visible_height
                     t["section_peak_elev_deg"] = peak_elev
                     t["tip_elev_deg"] = tip_elev
+            self._append("[DEBUG] Analisi LOS completata")
 
+        self._append("[DEBUG] Calcolo profilo orizzonte")
         az_plot, elev_horizon, _, stats = compute_horizon_profile(
             dtm_path=geotiff,
             observer_xy=(ox, oy),
@@ -692,7 +702,9 @@ class UnifiedViewApp(tk.Tk):
             max_range=float(self.max_range.get()),
             step_m=float(self.sample_step.get()),
         )
+        self._append(f"[DEBUG] Profilo orizzonte completato: campioni={len(az_plot)} nodata={stats['nodata_samples']}")
 
+        self._append("[DEBUG] Calcolo assetto camera (centro turbine / view)")
         hubs = np.array([[t["base_xyz"][0], t["base_xyz"][1], t["base_xyz"][2] + t["tower_height_m"]] for t in turbines])
         centroid = hubs.mean(axis=0)
         auto_az = azimuth_deg(ox, oy, float(centroid[0]), float(centroid[1]))
@@ -710,7 +722,9 @@ class UnifiedViewApp(tk.Tk):
             else:
                 view_az = float(self.view_az.get())
                 view_el = float(self.view_el.get())
+        self._append(f"[DEBUG] Camera view impostata: az={view_az:.3f} el={view_el:.3f}")
 
+        self._append("[DEBUG] Calcolo intrinsics camera")
         intr = intrinsics_from_photo(
             focal_mm=float(self.focal_mm.get()),
             sensor_mm=(float(self.sensor_w.get()), float(self.sensor_h.get())),
@@ -719,6 +733,7 @@ class UnifiedViewApp(tk.Tk):
             fov_scale=float(self.fov_scale.get()),
         )
 
+        self._append("[DEBUG] Rendering camera_view PNG")
         forward = forward_from_az_el_deg(view_az, view_el)
         pose = camera_pose_from_forward(np.array([ox, oy, oz], dtype=float), forward)
 
@@ -733,10 +748,12 @@ class UnifiedViewApp(tk.Tk):
             turbines=turbines,
             transparent=self.transparent.get(),
         )
+        self._append(f"[DEBUG] Rendering camera_view completato: {base_output_png}")
 
         profile_path = None
         if self.gen_profile.get():
             profile_path = base_output_png.with_name(base_output_png.stem.replace("_camera_view", "") + "_horizon_profile.png")
+            self._append(f"[DEBUG] Rendering horizon_profile PNG: {profile_path}")
             try:
                 from core.render_profile import render_horizon_profile_png
             except ModuleNotFoundError as exc:
@@ -759,6 +776,7 @@ class UnifiedViewApp(tk.Tk):
                 view_elev_deg=view_el,
                 transparent=self.transparent.get(),
             )
+            self._append(f"[DEBUG] Rendering horizon_profile completato: {profile_path}")
 
 
         self._append(f"camera_view: {base_output_png}")
@@ -789,6 +807,7 @@ class UnifiedViewApp(tk.Tk):
 
         dt = time.perf_counter() - t0
         self._append(f"Tempo totale: {dt:.2f}s")
+        self._append("[DEBUG] _run_single_observer END")
         return base_output_png, profile_path
 
     def generate(self):
