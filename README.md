@@ -130,6 +130,22 @@ Quota base di ogni WTG calcolata da DTM in (X,Y).
 
 Descrizione algoritmo in docs/wtg_unified_algorithm.md.
 
+
+Applicazione automatica senza conflitti (consigliata)
+Per evitare qualsiasi merge conflict manuale quando devi riallineare tutte le modifiche batch-shapefile, usa gli script in `build_scripts/`:
+
+Windows:
+```bat
+build_scripts\auto_sync_batch_branch.bat auto/batch-shapefile HEAD
+```
+
+Linux/macOS:
+```bash
+./build_scripts/auto_sync_batch_branch.sh auto/batch-shapefile HEAD
+```
+
+Gli script creano un branch nuovo dalla base `eebc76f` e applicano un merge `--ff-only` dal ref sorgente: se il fast-forward è possibile non ci sono conflitti da risolvere.
+
 Build Windows (.exe)
 Build Overlay (gui.py)
 build_scripts\build_windows.bat
