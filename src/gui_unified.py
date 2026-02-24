@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import importlib
+import importlib.util
 import math
 from pathlib import Path
 import re
@@ -607,13 +607,15 @@ class UnifiedViewApp(tk.Tk):
         return points
 
     def _get_shapefile_module(self):
-        try:
-            return importlib.import_module("shapefile")
-        except ModuleNotFoundError as exc:
+        if importlib.util.find_spec("shapefile") is None:
             raise RuntimeError(
                 "Dipendenza mancante: modulo 'shapefile' (pacchetto pyshp). "
                 "Installa/ricompila con pyshp disponibile."
-            ) from exc
+            )
+
+        import shapefile
+
+        return shapefile
 
     def _run_single_observer(self, ox: float, oy: float, base_output_png: Path, turbines_input: list[dict], az_start: float, az_end: float, force_view_az: float | None = None, force_view_el: float | None = None) -> tuple[Path, Path | None]:
         geotiff = Path(self.geotiff_path.get().strip())
