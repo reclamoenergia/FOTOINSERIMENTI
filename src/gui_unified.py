@@ -15,7 +15,7 @@ import rasterio
 from core.camera_model import camera_pose_from_forward, forward_from_az_el_deg, intrinsics_from_photo
 from core.dtm import DTM
 from core.horizon import azimuth_deg, compute_horizon_profile, elevation_deg, interpolate_horizon_elevation
-from core.render_camera_view import render_camera_view_png
+from core.render_camera_view import compute_camera_render_scene, render_camera_view_scene, render_visible_parts_view_png
 
 
 class UnifiedViewApp(tk.Tk):
@@ -34,6 +34,8 @@ class UnifiedViewApp(tk.Tk):
         self.output_png = tk.StringVar(value="camera_view.png")
         self.transparent = tk.BooleanVar(value=False)
         self.gen_profile = tk.BooleanVar(value=False)
+        self.gen_visible_parts = tk.BooleanVar(value=False)
+        self.visible_parts_suffix = tk.StringVar(value="_visible_parts")
 
         self.batch_mode = tk.BooleanVar(value=False)
         self.batch_shapefile = tk.StringVar()
@@ -135,23 +137,26 @@ class UnifiedViewApp(tk.Tk):
         ttk.Button(f, text="Salva come", command=self._pick_output_png).grid(row=1, column=2, padx=6, pady=4)
         ttk.Checkbutton(f, text="Sfondo trasparente", variable=self.transparent).grid(row=2, column=1, sticky="w", padx=6)
         ttk.Checkbutton(f, text="Genera anche horizon_profile.png", variable=self.gen_profile).grid(row=3, column=1, sticky="w", padx=6)
+        ttk.Checkbutton(f, text="Genera immagine parti visibili", variable=self.gen_visible_parts).grid(row=4, column=1, sticky="w", padx=6)
+        ttk.Label(f, text="Suffisso parti visibili").grid(row=5, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(f, textvariable=self.visible_parts_suffix, width=20).grid(row=5, column=1, sticky="w", padx=6, pady=4)
 
-        ttk.Separator(f, orient=tk.HORIZONTAL).grid(row=4, column=0, columnspan=3, sticky="ew", padx=6, pady=(8, 6))
-        ttk.Checkbutton(f, text="Batch shapefile", variable=self.batch_mode).grid(row=5, column=0, sticky="w", padx=6, pady=4)
+        ttk.Separator(f, orient=tk.HORIZONTAL).grid(row=6, column=0, columnspan=3, sticky="ew", padx=6, pady=(8, 6))
+        ttk.Checkbutton(f, text="Batch shapefile", variable=self.batch_mode).grid(row=7, column=0, sticky="w", padx=6, pady=4)
 
         self.batch_shp_label = ttk.Label(f, text="Shapefile punti")
-        self.batch_shp_label.grid(row=6, column=0, sticky="w", padx=6, pady=4)
+        self.batch_shp_label.grid(row=8, column=0, sticky="w", padx=6, pady=4)
         self.batch_shp_entry = ttk.Entry(f, textvariable=self.batch_shapefile, width=70)
-        self.batch_shp_entry.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
+        self.batch_shp_entry.grid(row=8, column=1, sticky="ew", padx=6, pady=4)
         self.batch_shp_btn = ttk.Button(f, text="Sfoglia", command=self._pick_batch_shapefile)
-        self.batch_shp_btn.grid(row=6, column=2, padx=6, pady=4)
+        self.batch_shp_btn.grid(row=8, column=2, padx=6, pady=4)
 
         self.batch_out_label = ttk.Label(f, text="Cartella output batch")
-        self.batch_out_label.grid(row=7, column=0, sticky="w", padx=6, pady=4)
+        self.batch_out_label.grid(row=9, column=0, sticky="w", padx=6, pady=4)
         self.batch_out_entry = ttk.Entry(f, textvariable=self.batch_output_dir, width=70)
-        self.batch_out_entry.grid(row=7, column=1, sticky="ew", padx=6, pady=4)
+        self.batch_out_entry.grid(row=9, column=1, sticky="ew", padx=6, pady=4)
         self.batch_out_btn = ttk.Button(f, text="Seleziona", command=self._pick_batch_output_dir)
-        self.batch_out_btn.grid(row=7, column=2, padx=6, pady=4)
+        self.batch_out_btn.grid(row=9, column=2, padx=6, pady=4)
         f.columnconfigure(1, weight=1)
 
     def _build_camera_section(self, parent):
@@ -497,6 +502,8 @@ class UnifiedViewApp(tk.Tk):
         self.output_png.set(str(output.get("camera_png", "camera_view.png")))
         self.transparent.set(bool(output.get("transparent", False)))
         self.gen_profile.set(bool(output.get("generate_horizon_profile", self.gen_profile.get())))
+        self.gen_visible_parts.set(bool(output.get("generate_visible_parts", self.gen_visible_parts.get())))
+        self.visible_parts_suffix.set(str(output.get("visible_parts_suffix", "_visible_parts")))
 
         batch = cfg.get("batch", {})
         self.batch_mode.set(bool(batch.get("enabled", False)))
@@ -557,6 +564,8 @@ class UnifiedViewApp(tk.Tk):
                 "camera_png": self.output_png.get(),
                 "transparent": self.transparent.get(),
                 "generate_horizon_profile": self.gen_profile.get(),
+                "generate_visible_parts": self.gen_visible_parts.get(),
+                "visible_parts_suffix": self._normalize_visible_parts_suffix(),
             },
             "batch": {
                 "enabled": self.batch_mode.get(),
@@ -606,6 +615,20 @@ class UnifiedViewApp(tk.Tk):
             raise ValueError("Nessun punto valido nel shapefile")
         return points
 
+    def _normalize_visible_parts_suffix(self) -> str:
+        suffix = self.visible_parts_suffix.get().strip() or "_visible_parts"
+        if not suffix.startswith("_"):
+            suffix = f"_{suffix}"
+        self.visible_parts_suffix.set(suffix)
+        return suffix
+
+    def _build_visible_parts_path(self, base_output_png: Path) -> Path:
+        suffix = self._normalize_visible_parts_suffix()
+        stem = base_output_png.stem
+        if stem.endswith("_camera_view"):
+            stem = stem[: -len("_camera_view")]
+        return base_output_png.with_name(f"{stem}{suffix}.png")
+
     def _get_shapefile_module(self):
         if importlib.util.find_spec("shapefile") is None:
             raise RuntimeError(
@@ -617,7 +640,17 @@ class UnifiedViewApp(tk.Tk):
 
         return shapefile
 
-    def _run_single_observer(self, ox: float, oy: float, base_output_png: Path, turbines_input: list[dict], az_start: float, az_end: float, force_view_az: float | None = None, force_view_el: float | None = None) -> tuple[Path, Path | None]:
+    def _run_single_observer(
+        self,
+        ox: float,
+        oy: float,
+        base_output_png: Path,
+        turbines_input: list[dict],
+        az_start: float,
+        az_end: float,
+        force_view_az: float | None = None,
+        force_view_el: float | None = None,
+    ) -> tuple[Path, Path | None, Path | None]:
         geotiff = Path(self.geotiff_path.get().strip())
         t0 = time.perf_counter()
         self._append(f"[DEBUG] _run_single_observer START output={base_output_png} az_range=({az_start:.3f},{az_end:.3f})")
@@ -733,12 +766,10 @@ class UnifiedViewApp(tk.Tk):
             fov_scale=float(self.fov_scale.get()),
         )
 
-        self._append("[DEBUG] Rendering camera_view PNG")
+        self._append("[DEBUG] Preparazione scena camera (skyline/proiezioni condivise)")
         forward = forward_from_az_el_deg(view_az, view_el)
         pose = camera_pose_from_forward(np.array([ox, oy, oz], dtype=float), forward)
-
-        cam_res = render_camera_view_png(
-            output_path=base_output_png,
+        scene = compute_camera_render_scene(
             intr=intr,
             pose=pose,
             az_plot=az_plot,
@@ -746,9 +777,28 @@ class UnifiedViewApp(tk.Tk):
             view_az_deg=view_az,
             view_elev_deg=view_el,
             turbines=turbines,
+        )
+
+        self._append("[DEBUG] Rendering camera_view PNG")
+        cam_res = render_camera_view_scene(
+            output_path=base_output_png,
+            scene=scene,
             transparent=self.transparent.get(),
+            all_turbine_ids=[str(t["id"]) for t in turbines],
         )
         self._append(f"[DEBUG] Rendering camera_view completato: {base_output_png}")
+
+        visible_parts_path = None
+        if self.gen_visible_parts.get():
+            visible_parts_path = self._build_visible_parts_path(base_output_png)
+            self._append(f"[DEBUG] Rendering visible_parts PNG: {visible_parts_path}")
+            render_visible_parts_view_png(
+                output_path=visible_parts_path,
+                scene=scene,
+                transparent=self.transparent.get(),
+            )
+            self._append(f"[DEBUG] Rendering visible_parts completato: {visible_parts_path}")
+            self._append(f"visible_parts: {visible_parts_path}")
 
         profile_path = None
         if self.gen_profile.get():
@@ -782,6 +832,8 @@ class UnifiedViewApp(tk.Tk):
         self._append(f"camera_view: {base_output_png}")
         if profile_path is not None:
             self._append(f"horizon_profile: {profile_path}")
+        if visible_parts_path is not None:
+            self._append(f"Immagine parti visibili generata: {visible_parts_path}")
         self._append(f"Nodata samples: {stats['nodata_samples']}")
         self._append(f"Turbine in FOV/frame: {', '.join(cam_res.inside_ids) if cam_res.inside_ids else 'none'}")
         self._append(f"Turbine fuori FOV/frame: {', '.join(cam_res.outside_ids) if cam_res.outside_ids else 'none'}")
@@ -808,7 +860,7 @@ class UnifiedViewApp(tk.Tk):
         dt = time.perf_counter() - t0
         self._append(f"Tempo totale: {dt:.2f}s")
         self._append("[DEBUG] _run_single_observer END")
-        return base_output_png, profile_path
+        return base_output_png, profile_path, visible_parts_path
 
     def generate(self):
         try:
