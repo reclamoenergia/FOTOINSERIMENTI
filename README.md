@@ -7,6 +7,7 @@ Applicazione desktop Python con GUI (Tkinter) per generare overlay PNG trasparen
 - Proiezione pinhole coerente con coordinate 3D del mondo.
 - Look-at automatico camera -> centroide dei mozzi turbine.
 - Disegno torri (linee) e rotori (cerchi).
+- Output opzionale separato con sole parti visibili delle WTG sopra l'orizzonte, con rotore stilizzato a 3 pale.
 - Supporto crop (`x,y,w,h`) senza alterare la prospettiva.
 - Parametro `fov_scale` per taratura rapida su panoramiche stitchate.
 - Log turbine disegnate/scartate e motivazione.
@@ -97,7 +98,7 @@ Schema JSON supportato (esempio)
 range.step_m = 0 usa automaticamente il pixel size del DTM.
 
 Tool 3: Unified Camera View
-GUI principale in src/gui_unified.py per generare camera_view.png (skyline + turbine in prospettiva) e opzionalmente horizon_profile.png.
+GUI principale in src/gui_unified.py per generare camera_view.png (skyline + turbine in prospettiva), opzionalmente horizon_profile.png e opzionalmente una seconda immagine con le sole parti visibili sopra l'orizzonte.
 
 
 Batch shapefile punti osservatore
@@ -110,6 +111,7 @@ Modalità opzionale in `src/gui_unified.py`:
 Per ogni punto vengono generati:
 - `<Nome>_camera_view.png`
 - `<Nome>_horizon_profile.png` (se abilitato)
+- `<Nome>_visible_parts.png` (se abilitato)
 
 Nel batch l'intervallo azimutale è calcolato automaticamente per ogni osservatore con finestra 180° centrata sull'azimut medio circolare delle turbine (`az_start = center-90`, `az_end = center+90`).
 
@@ -127,6 +129,23 @@ Salvataggio/caricamento configurazione JSON supporta tutti i parametri GUI.
 Quota osservatore calcolata da DTM: Z = DTM(X,Y) + eye_height.
 
 Quota base di ogni WTG calcolata da DTM in (X,Y).
+
+Nuova opzione GUI:
+
+- checkbox **Genera immagine parti visibili**
+- suffisso configurabile del file aggiuntivo (default `_visible_parts`)
+- l'immagine aggiuntiva riusa la stessa skyline/proiezione della `camera_view`, ma mostra solo:
+  - il tratto di torre sopra l'orizzonte
+  - 3 pale stilizzate a 120° tra loro
+  - solo le porzioni di pala sopra la skyline
+
+Output aggiuntivo:
+
+- `<base_name>_visible_parts.png`
+
+Log:
+
+- quando l'opzione è attiva, la GUI scrive esplicitamente il path del nuovo file `visible_parts`
 
 Descrizione algoritmo in docs/wtg_unified_algorithm.md.
 
@@ -148,4 +167,3 @@ Se all'avvio dell'exe compare errore simile a:
 ModuleNotFoundError: No module named 'rasterio.sample'
 ricostruire l'exe nello stesso ambiente Python in cui rasterio è installato, usando i flag/hook sopra.
 Se il problema persiste, cancellare build/ e dist/ prima di ricompilare.
-
