@@ -777,6 +777,7 @@ class UnifiedViewApp(tk.Tk):
             view_az_deg=view_az,
             view_elev_deg=view_el,
             turbines=turbines,
+            debug_log=self._append,
         )
 
         self._append("[DEBUG] Rendering camera_view PNG")
@@ -796,6 +797,7 @@ class UnifiedViewApp(tk.Tk):
                 output_path=visible_parts_path,
                 scene=scene,
                 transparent=self.transparent.get(),
+                debug_log=self._append,
             )
             self._append(f"[DEBUG] Rendering visible_parts completato: {visible_parts_path}")
             self._append(f"visible_parts: {visible_parts_path}")

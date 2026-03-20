@@ -15,6 +15,7 @@ from .camera_model import CameraIntrinsics, CameraPose, project_point
 Color = tuple[int, int, int, int]
 Point2D = tuple[float, float]
 Segment2D = tuple[Point2D, Point2D]
+DebugLogger = Callable[[str], None]
 
 SKYLINE_COLOR: Color = (80, 170, 255, 255)
 TOWER_COLOR: Color = (0, 255, 120, 255)
@@ -33,8 +34,14 @@ class CameraRenderResult:
 @dataclass
 class ProjectedSkyline:
     points: list[Point2D]
+    draw_segments: list[list[Point2D]]
     x_samples: np.ndarray
     y_samples: np.ndarray
+    valid_point_count: int
+    x_min: float | None
+    x_max: float | None
+    y_min: float | None
+    y_max: float | None
 
 
 @dataclass
@@ -57,8 +64,40 @@ class CameraRenderScene:
     horizon_y: Callable[[float], float]
 
 
+@dataclass
+class VisiblePartsTurbineLog:
+    turbine_id: str
+    base_px: Point2D
+    hub_px: Point2D
+    horizon_y_base: float
+    horizon_y_hub: float
+    base_visible: bool
+    hub_visible: bool
+    visible_blade_segments: int
+    tower_drawn: bool
+
+
 def _wrap_pi(rad: float) -> float:
     return (rad + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _is_finite_point(point: Point2D) -> bool:
+    return math.isfinite(point[0]) and math.isfinite(point[1])
+
+
+def _build_draw_segments(points: list[Point2D]) -> list[list[Point2D]]:
+    segments: list[list[Point2D]] = []
+    current: list[Point2D] = []
+    for point in points:
+        if _is_finite_point(point):
+            current.append(point)
+            continue
+        if len(current) >= 2:
+            segments.append(current)
+        current = []
+    if len(current) >= 2:
+        segments.append(current)
+    return segments
 
 
 def _project_skyline(
@@ -78,11 +117,23 @@ def _project_skyline(
         y = intr.cy - intr.fy * math.tan(dy)
         pts.append((x, y))
 
-    if not pts:
-        return ProjectedSkyline(points=[], x_samples=np.empty(0, dtype=float), y_samples=np.empty(0, dtype=float))
+    draw_segments = _build_draw_segments(pts)
+    valid_points = [point for point in pts if _is_finite_point(point)]
+    if not valid_points:
+        return ProjectedSkyline(
+            points=pts,
+            draw_segments=draw_segments,
+            x_samples=np.empty(0, dtype=float),
+            y_samples=np.empty(0, dtype=float),
+            valid_point_count=0,
+            x_min=None,
+            x_max=None,
+            y_min=None,
+            y_max=None,
+        )
 
-    x_arr = np.array([p[0] for p in pts], dtype=float)
-    y_arr = np.array([p[1] for p in pts], dtype=float)
+    x_arr = np.array([p[0] for p in valid_points], dtype=float)
+    y_arr = np.array([p[1] for p in valid_points], dtype=float)
     order = np.argsort(x_arr, kind="mergesort")
     x_sorted = x_arr[order]
     y_sorted = y_arr[order]
@@ -98,12 +149,32 @@ def _project_skyline(
 
     return ProjectedSkyline(
         points=pts,
+        draw_segments=draw_segments,
         x_samples=np.array(unique_x, dtype=float),
         y_samples=np.array(unique_y, dtype=float),
+        valid_point_count=len(valid_points),
+        x_min=float(np.min(x_arr)),
+        x_max=float(np.max(x_arr)),
+        y_min=float(np.min(y_arr)),
+        y_max=float(np.max(y_arr)),
     )
 
 
-def build_horizon_interpolator(skyline: ProjectedSkyline) -> Callable[[float], float]:
+def build_horizon_interpolator(
+    skyline: ProjectedSkyline,
+    debug_log: DebugLogger | None = None,
+) -> Callable[[float], float]:
+    if debug_log is not None:
+        if skyline.valid_point_count == 0:
+            debug_log("[DEBUG] Skyline pixel stats: valid_points=0")
+        else:
+            debug_log(
+                "[DEBUG] Skyline pixel stats: "
+                f"valid_points={skyline.valid_point_count} "
+                f"x_min={skyline.x_min:.2f} x_max={skyline.x_max:.2f} "
+                f"y_min={skyline.y_min:.2f} y_max={skyline.y_max:.2f}"
+            )
+
     if len(skyline.x_samples) == 0:
         return lambda _x: float("inf")
 
@@ -111,8 +182,17 @@ def build_horizon_interpolator(skyline: ProjectedSkyline) -> Callable[[float], f
         horizon_y = float(skyline.y_samples[0])
         return lambda _x: horizon_y
 
+    x_min = float(skyline.x_samples[0])
+    x_max = float(skyline.x_samples[-1])
+    y_left = float(skyline.y_samples[0])
+    y_right = float(skyline.y_samples[-1])
+
     def _horizon_y(x_value: float) -> float:
-        return float(np.interp(x_value, skyline.x_samples, skyline.y_samples, left=skyline.y_samples[0], right=skyline.y_samples[-1]))
+        if x_value < x_min:
+            return y_left
+        if x_value > x_max:
+            return y_right
+        return float(np.interp(x_value, skyline.x_samples, skyline.y_samples))
 
     return _horizon_y
 
@@ -173,6 +253,7 @@ def compute_camera_render_scene(
     view_az_deg: float,
     view_elev_deg: float,
     turbines: list[dict[str, Any]],
+    debug_log: DebugLogger | None = None,
 ) -> CameraRenderScene:
     skyline = _project_skyline(
         intr=intr,
@@ -186,7 +267,7 @@ def compute_camera_render_scene(
         pose=pose,
         skyline=skyline,
         turbines=_project_turbines(intr=intr, pose=pose, turbines=turbines),
-        horizon_y=build_horizon_interpolator(skyline),
+        horizon_y=build_horizon_interpolator(skyline, debug_log=debug_log),
     )
 
 
@@ -197,8 +278,9 @@ def _new_image(intr: CameraIntrinsics, transparent: bool) -> tuple[Image.Image, 
 
 
 def _draw_skyline(draw: ImageDraw.ImageDraw, skyline: ProjectedSkyline) -> None:
-    if len(skyline.points) >= 2:
-        draw.line(skyline.points, fill=SKYLINE_COLOR, width=3)
+    for segment in skyline.draw_segments:
+        if len(segment) >= 2:
+            draw.line(segment, fill=SKYLINE_COLOR, width=3)
 
 
 def _load_label_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -253,86 +335,79 @@ def _render_camera_scene(
     return CameraRenderResult(inside_ids=inside, outside_ids=outside)
 
 
-def _difference_to_horizon(scene: CameraRenderScene, point_a: Point2D, point_b: Point2D, t_value: float) -> float:
+def is_point_above_horizon(point: Point2D, horizon_y_func: Callable[[float], float]) -> bool:
+    return point[1] < horizon_y_func(point[0])
+
+
+def _difference_to_horizon(point_a: Point2D, point_b: Point2D, t_value: float, horizon_y_func: Callable[[float], float]) -> float:
     x = point_a[0] + (point_b[0] - point_a[0]) * t_value
     y = point_a[1] + (point_b[1] - point_a[1]) * t_value
-    return y - scene.horizon_y(x)
+    return y - horizon_y_func(x)
 
 
-def _solve_segment_horizon_intersection(scene: CameraRenderScene, point_a: Point2D, point_b: Point2D, t0: float, t1: float) -> float:
-    d0 = _difference_to_horizon(scene, point_a, point_b, t0)
-    d1 = _difference_to_horizon(scene, point_a, point_b, t1)
-    if math.isclose(d0, 0.0, abs_tol=1e-6):
-        return t0
-    if math.isclose(d1, 0.0, abs_tol=1e-6):
-        return t1
+def _solve_segment_horizon_intersection(
+    point_a: Point2D,
+    point_b: Point2D,
+    horizon_y_func: Callable[[float], float],
+) -> Point2D:
+    left = 0.0
+    right = 1.0
+    d_left = _difference_to_horizon(point_a, point_b, left, horizon_y_func)
+    d_right = _difference_to_horizon(point_a, point_b, right, horizon_y_func)
 
-    left = t0
-    right = t1
-    for _ in range(40):
+    if math.isclose(d_left, 0.0, abs_tol=1e-6):
+        return point_a
+    if math.isclose(d_right, 0.0, abs_tol=1e-6):
+        return point_b
+
+    for _ in range(60):
         mid = (left + right) * 0.5
-        dm = _difference_to_horizon(scene, point_a, point_b, mid)
-        if math.isclose(dm, 0.0, abs_tol=1e-6):
-            return mid
-        if d0 * dm <= 0.0:
+        d_mid = _difference_to_horizon(point_a, point_b, mid, horizon_y_func)
+        if math.isclose(d_mid, 0.0, abs_tol=1e-6):
+            left = mid
             right = mid
-            d1 = dm
+            break
+        if d_left * d_mid <= 0.0:
+            right = mid
+            d_right = d_mid
         else:
             left = mid
-            d0 = dm
-    return (left + right) * 0.5
+            d_left = d_mid
+
+    t_value = (left + right) * 0.5
+    return (
+        point_a[0] + (point_b[0] - point_a[0]) * t_value,
+        point_a[1] + (point_b[1] - point_a[1]) * t_value,
+    )
 
 
 def clip_segment_against_horizon(
     point_a: Point2D,
     point_b: Point2D,
-    scene: CameraRenderScene,
-) -> list[Segment2D]:
-    dx = point_b[0] - point_a[0]
-    params: list[float] = [0.0, 1.0]
-    if abs(dx) > 1e-9:
-        x_min = min(point_a[0], point_b[0])
-        x_max = max(point_a[0], point_b[0])
-        for x_break in scene.skyline.x_samples[1:-1]:
-            if x_min < x_break < x_max:
-                params.append((float(x_break) - point_a[0]) / dx)
+    horizon_y_func: Callable[[float], float],
+) -> Segment2D | None:
+    point_a_visible = is_point_above_horizon(point_a, horizon_y_func)
+    point_b_visible = is_point_above_horizon(point_b, horizon_y_func)
 
-    params = sorted(min(1.0, max(0.0, p)) for p in params)
+    if point_a_visible and point_b_visible:
+        return (point_a, point_b)
+    if (not point_a_visible) and (not point_b_visible):
+        return None
 
-    visible_segments: list[Segment2D] = []
-    for t0, t1 in zip(params[:-1], params[1:]):
-        if t1 - t0 <= 1e-9:
-            continue
-        tm = (t0 + t1) * 0.5
-        if _difference_to_horizon(scene, point_a, point_b, tm) >= 0.0:
-            continue
-
-        start_t = t0
-        end_t = t1
-        d0 = _difference_to_horizon(scene, point_a, point_b, t0)
-        d1 = _difference_to_horizon(scene, point_a, point_b, t1)
-        if d0 >= 0.0:
-            start_t = _solve_segment_horizon_intersection(scene, point_a, point_b, t0, tm)
-        if d1 >= 0.0:
-            end_t = _solve_segment_horizon_intersection(scene, point_a, point_b, tm, t1)
-
-        start = (
-            point_a[0] + dx * start_t,
-            point_a[1] + (point_b[1] - point_a[1]) * start_t,
-        )
-        end = (
-            point_a[0] + dx * end_t,
-            point_a[1] + (point_b[1] - point_a[1]) * end_t,
-        )
-        if math.hypot(end[0] - start[0], end[1] - start[1]) > 1e-6:
-            visible_segments.append((start, end))
-
-    return visible_segments
+    intersection = _solve_segment_horizon_intersection(point_a, point_b, horizon_y_func)
+    if point_a_visible:
+        return (point_a, intersection)
+    return (intersection, point_b)
 
 
-def _draw_visible_segment_list(draw: ImageDraw.ImageDraw, segments: list[Segment2D], color: Color, width: int) -> None:
-    for start, end in segments:
-        draw.line([start, end], fill=color, width=width)
+def _draw_visible_segment(draw: ImageDraw.ImageDraw, segment: Segment2D | None, color: Color, width: int) -> bool:
+    if segment is None:
+        return False
+    start, end = segment
+    if math.hypot(end[0] - start[0], end[1] - start[1]) <= 1e-6:
+        return False
+    draw.line([start, end], fill=color, width=width)
+    return True
 
 
 def render_visible_parts_view_png(
@@ -340,28 +415,61 @@ def render_visible_parts_view_png(
     scene: CameraRenderScene,
     transparent: bool = False,
     blade_rotation_deg: float = 0.0,
-) -> None:
+    debug_log: DebugLogger | None = None,
+) -> list[VisiblePartsTurbineLog]:
     image, draw = _new_image(scene.intr, transparent)
     _draw_skyline(draw, scene.skyline)
 
+    turbine_logs: list[VisiblePartsTurbineLog] = []
     for turbine in scene.turbines:
-        tower_segments = clip_segment_against_horizon(turbine.base_point, turbine.hub_point, scene)
-        _draw_visible_segment_list(draw, tower_segments, color=TOWER_COLOR, width=3)
+        horizon_y_base = scene.horizon_y(turbine.base_point[0])
+        horizon_y_hub = scene.horizon_y(turbine.hub_point[0])
+        base_visible = is_point_above_horizon(turbine.base_point, scene.horizon_y)
+        hub_visible = is_point_above_horizon(turbine.hub_point, scene.horizon_y)
 
-        if turbine.rotor_radius_px <= 0:
-            continue
+        tower_segment = clip_segment_against_horizon(turbine.base_point, turbine.hub_point, scene.horizon_y)
+        tower_drawn = _draw_visible_segment(draw, tower_segment, color=TOWER_COLOR, width=3)
 
-        hub_x, hub_y = turbine.hub_point
-        for blade_angle_deg in DEFAULT_BLADE_ANGLES_DEG:
-            angle_rad = math.radians(blade_angle_deg + blade_rotation_deg)
-            tip = (
-                hub_x + turbine.rotor_radius_px * math.cos(angle_rad),
-                hub_y + turbine.rotor_radius_px * math.sin(angle_rad),
+        visible_blade_segments = 0
+        if turbine.rotor_radius_px > 0:
+            hub_x, hub_y = turbine.hub_point
+            for blade_angle_deg in DEFAULT_BLADE_ANGLES_DEG:
+                angle_rad = math.radians(blade_angle_deg + blade_rotation_deg)
+                tip = (
+                    hub_x + turbine.rotor_radius_px * math.cos(angle_rad),
+                    hub_y + turbine.rotor_radius_px * math.sin(angle_rad),
+                )
+                blade_segment = clip_segment_against_horizon(turbine.hub_point, tip, scene.horizon_y)
+                if _draw_visible_segment(draw, blade_segment, color=ROTOR_COLOR, width=3):
+                    visible_blade_segments += 1
+
+        item_log = VisiblePartsTurbineLog(
+            turbine_id=turbine.turbine_id,
+            base_px=turbine.base_point,
+            hub_px=turbine.hub_point,
+            horizon_y_base=float(horizon_y_base),
+            horizon_y_hub=float(horizon_y_hub),
+            base_visible=base_visible,
+            hub_visible=hub_visible,
+            visible_blade_segments=visible_blade_segments,
+            tower_drawn=tower_drawn,
+        )
+        turbine_logs.append(item_log)
+        if debug_log is not None:
+            debug_log(
+                f"[DEBUG] visible_parts {item_log.turbine_id}: "
+                f"base_px=({item_log.base_px[0]:.2f},{item_log.base_px[1]:.2f}) "
+                f"hub_px=({item_log.hub_px[0]:.2f},{item_log.hub_px[1]:.2f}) "
+                f"horizon_y(base_x)={item_log.horizon_y_base:.2f} "
+                f"horizon_y(hub_x)={item_log.horizon_y_hub:.2f} "
+                f"base_visible={item_log.base_visible} "
+                f"hub_visible={item_log.hub_visible} "
+                f"tower_drawn={item_log.tower_drawn} "
+                f"visible_blade_segments={item_log.visible_blade_segments}"
             )
-            blade_segments = clip_segment_against_horizon(turbine.hub_point, tip, scene)
-            _draw_visible_segment_list(draw, blade_segments, color=ROTOR_COLOR, width=3)
 
     image.save(output_path)
+    return turbine_logs
 
 
 def render_camera_view_png(
@@ -375,6 +483,7 @@ def render_camera_view_png(
     turbines: list[dict[str, Any]],
     transparent: bool = False,
     draw_crosshair: bool = True,
+    debug_log: DebugLogger | None = None,
 ) -> CameraRenderResult:
     scene = compute_camera_render_scene(
         intr=intr,
@@ -384,6 +493,7 @@ def render_camera_view_png(
         view_az_deg=view_az_deg,
         view_elev_deg=view_elev_deg,
         turbines=turbines,
+        debug_log=debug_log,
     )
     return render_camera_view_scene(
         output_path=output_path,
